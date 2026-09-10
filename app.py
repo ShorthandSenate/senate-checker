@@ -76,7 +76,7 @@ st.set_page_config(
     page_title="ตรวจรายงานการประชุมวุฒิสภา",
     page_icon="📋",
     layout="wide",
-    initial_sidebar_state="expanded",
+    initial_sidebar_state="collapsed",
     menu_items={
         "About": "ระบบตรวจคำผิดรายงานการประชุมวุฒิสภา v1.0\nพัฒนาด้วย Streamlit + Gemini AI",
     },
@@ -221,59 +221,11 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ============================================================
-# Sidebar
+# Config (load API keys silently, no sidebar)
 # ============================================================
-with st.sidebar:
-    st.markdown("## ⚙️ การตั้งค่า")
-
-    # โหลด API Key และ Sheets URL จากระบบเบื้องหลัง (ผู้ใช้ทั่วไปจะไม่เห็นช่องกรอก)
-    api_key = _DEFAULT_API_KEY or getattr(config, "DEFAULT_API_KEY", "")
-    sheets_url = _DEFAULT_SHEETS_URL or getattr(config, "DEFAULT_SHEETS_URL", "")
-
-    # แสดงสถานะความพร้อมของระบบและฐานข้อมูล
-    st.markdown("### 🟢 ฐานข้อมูลและสถานะระบบ")
-    if api_key:
-        st.success("✓ ระบบ AI พร้อมใช้งาน", icon="🤖")
-    else:
-        st.warning("⚠️ ยังไม่ได้ตั้งค่า AI Key ใน Secrets", icon="⚠️")
-
-    # แสดงสถานะฐานข้อมูลทางการ
-    import database_manager as dm
-    _get_total = getattr(dm, "get_total_count", lambda: 1561)
-    _get_senators = getattr(dm, "get_senators_count", lambda: 200)
-    total_vocab = _get_total()
-    senators_cnt = _get_senators()
-    st.success(f"✓ คำทับศัพท์ทางการ: {total_vocab:,} คำ", icon="📚")
-    st.success(f"✓ ทำเนียบ สว. ๒๕๖๗: {senators_cnt} ท่าน (ยศพิมพ์ห่าง / วรรค ๒ เคาะ)", icon="🏛️")
-    st.success("✓ ระเบียบสำนักกรรมาธิการ ๓: พร้อมตรวจเข้มงวด", icon="⚖️")
-
-    if sheets_url:
-        st.caption("📊 เชื่อมต่อ Google Sheets เสริมแล้ว")
-
-    st.divider()
-
-    # เปิด/ปิดกฎการตรวจสอบ
-    st.markdown("### 📏 กฎการตรวจสอบ")
-    rule_overrides: dict = {}
-    for rk, rc in RULES_CONFIG.items():
-        rule_overrides[rk] = st.toggle(
-            rc["label"],
-            value=rc["enabled"],
-            help=rc["description"],
-            key=f"toggle_{rk}",
-        )
-
-    st.divider()
-
-    # คำแนะนำวิธีใช้งาน
-    with st.expander("ℹ️ คำแนะนำการใช้งาน", expanded=True):
-        st.markdown("""
-**วิธีใช้งานง่ายๆ 3 ขั้นตอน:**
-1. **อัปโหลดไฟล์ .docx** รายงานการประชุมวุฒิสภา
-2. เลือกเปิด/ปิดกฎการตรวจที่ต้องการด้านซ้าย
-3. กดปุ่ม **เริ่มตรวจสอบ** 🚀
-4. ในตารางผลลัพธ์ กดปุ่ม **📋 Copy** เพื่อนำข้อความแวดล้อมไปกด `Ctrl + F` ค้นหาจุดผิดในไฟล์ Word ได้ทันที
-        """)
+api_key = _DEFAULT_API_KEY or getattr(config, "DEFAULT_API_KEY", "")
+sheets_url = _DEFAULT_SHEETS_URL or getattr(config, "DEFAULT_SHEETS_URL", "")
+rule_overrides: dict = {}
 
 # ============================================================
 # File Upload
@@ -307,9 +259,7 @@ if uploaded_file:
         st.error(f"❌ ไฟล์ใหญ่เกินกำหนด ({file_size_mb:.1f} MB > {MAX_FILE_SIZE_MB} MB)")
         st.stop()
 
-    # อัปเดต rule config ตาม toggle
-    for rk, rv in rule_overrides.items():
-        RULES_CONFIG[rk]["enabled"] = rv
+    # กฎทุกข้อเปิดใช้งานอัตโนมัติ (ไม่ต้อง toggle)
 
     btn_c1, btn_c2, btn_c3 = st.columns([2, 1, 3])
     with btn_c1:

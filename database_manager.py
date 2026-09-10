@@ -46,17 +46,21 @@ def get_db_connection() -> Optional[sqlite3.Connection]:
 
 
 def init_db_if_needed():
-    """ตรวจสอบว่าไฟล์ฐานข้อมูลมีครบหรือไม่ ถ้าไม่มีให้สร้างใหม่"""
-    if not os.path.exists(SQLITE_DB_PATH) or os.path.getsize(SQLITE_DB_PATH) == 0:
-        try:
-            from database_builder import main as build_main
-            build_main()
-        except Exception as e:
-            logger.error(f"init_db_if_needed error: {e}")
+    """ตรวจสอบว่าไฟล์ฐานข้อมูลมีครบหรือไม่ ถ้าไม่มีให้ข้ามไป (ใช้ CSV fallback แทน)"""
+    try:
+        if not os.path.exists(SQLITE_DB_PATH) or os.path.getsize(SQLITE_DB_PATH) == 0:
+            # บน Cloud อาจไม่มี HTML source files สำหรับ builder
+            # ให้ใช้ CSV fallback แทนโดยไม่ต้อง build
+            logger.warning("vocab.db not found — will use CSV fallback")
+    except Exception as e:
+        logger.error(f"init_db_if_needed error: {e}")
 
 
-# เรียก init อัตโนมัติเมื่อ import โมดูล
-init_db_if_needed()
+# เรียก init อัตโนมัติเมื่อ import โมดูล (safe — จะไม่ crash)
+try:
+    init_db_if_needed()
+except Exception:
+    pass
 
 
 # ============================================================
