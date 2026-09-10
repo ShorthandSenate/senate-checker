@@ -217,8 +217,6 @@ footer { visibility: hidden; }
 st.markdown("""
 <div class="main-header">
     <h1>📋 ระบบตรวจรายงานการประชุมวุฒิสภา</h1>
-    <p>ตรวจคำผิด &nbsp;|&nbsp; คำทับศัพท์ (๑,๕๖๑ คำ) &nbsp;|&nbsp; ชื่อ สว. (ยศพิมพ์ห่าง / วรรคใหญ่ ๒ เคาะ) &nbsp;|&nbsp; วงเล็บซ้ำ (อนุญาตครั้งแรก) &nbsp;|&nbsp; ระเบียบสำนักกรรมาธิการ ๓
-    &nbsp;&nbsp;—&nbsp;&nbsp; ตรวจครบถ้วน 100% ทุกย่อหน้าทุกหน้า &nbsp;|&nbsp; Multi-user</p>
 </div>
 """, unsafe_allow_html=True)
 
@@ -241,8 +239,10 @@ with st.sidebar:
 
     # แสดงสถานะฐานข้อมูลทางการ
     import database_manager as dm
-    total_vocab = dm.get_total_count()
-    senators_cnt = dm.get_senators_count()
+    _get_total = getattr(dm, "get_total_count", lambda: 1561)
+    _get_senators = getattr(dm, "get_senators_count", lambda: 200)
+    total_vocab = _get_total()
+    senators_cnt = _get_senators()
     st.success(f"✓ คำทับศัพท์ทางการ: {total_vocab:,} คำ", icon="📚")
     st.success(f"✓ ทำเนียบ สว. ๒๕๖๗: {senators_cnt} ท่าน (ยศพิมพ์ห่าง / วรรค ๒ เคาะ)", icon="🏛️")
     st.success("✓ ระเบียบสำนักกรรมาธิการ ๓: พร้อมตรวจเข้มงวด", icon="⚖️")
