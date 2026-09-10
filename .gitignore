@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+
+# Secrets (NEVER commit these)
+.env
+.streamlit/secrets.toml
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Uploaded files (temp)
+*.docx
+
+# Apps Script (ไม่เกี่ยวกับโปรเจกต์นี้)
+.clasp.json
+appsscript.json
+รหัส.js

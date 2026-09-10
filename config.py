@@ -2,6 +2,11 @@
 # config.py - การตั้งค่าส่วนกลาง และ Rule Engine ที่ปรับแก้ได้ยืดหยุ่น
 # ============================================================
 
+# --- ค่าเริ่มต้น API Key และ Google Sheets (เบื้องหลังระบบ) ---
+# สามารถใส่ที่นี่ หรือใส่ใน Streamlit Secrets (แนะนำ) ได้เช่นกัน
+DEFAULT_API_KEY = ""
+DEFAULT_SHEETS_URL = ""
+
 # --- โมเดล Gemini สำหรับระบบ Multi-Model Fallback ---
 GEMINI_MODELS = [
     "gemini-2.5-pro",        # ลำดับ 1: ฉลาดที่สุด

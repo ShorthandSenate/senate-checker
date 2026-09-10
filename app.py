@@ -11,6 +11,7 @@ import streamlit as st
 
 import os
 from checker_engine import run_full_check
+import config
 from config import RULES_CONFIG, MAX_FILE_SIZE_MB, GEMINI_MODELS
 
 logging.basicConfig(
@@ -139,36 +140,28 @@ st.markdown("""
 with st.sidebar:
     st.markdown("## ⚙️ การตั้งค่า")
 
-    # API Key
-    with st.expander("🔑 Gemini API Key", expanded=True):
-        api_key = st.text_input(
-            "API Key",
-            type="password",
-            placeholder="AIza...",
-            help="ขอ Key ได้ที่ https://aistudio.google.com/app/apikey",
-            key="api_key",
-        )
-        if api_key:
-            st.success("✓ ตั้งค่า API Key แล้ว")
-        else:
-            st.warning("ยังไม่มี Key → ข้ามการตรวจ AI")
+    # โหลด API Key และ Sheets URL จากระบบเบื้องหลัง (ผู้ใช้ทั่วไปจะไม่เห็นช่องกรอก)
+    api_key = _DEFAULT_API_KEY or getattr(config, "DEFAULT_API_KEY", "")
+    sheets_url = _DEFAULT_SHEETS_URL or getattr(config, "DEFAULT_SHEETS_URL", "")
 
-    # Google Sheets URL
-    with st.expander("📊 Google Sheets Database", expanded=True):
-        sheets_url = st.text_input(
-            "CSV Export URL",
-            placeholder="https://docs.google.com/spreadsheets/d/.../export?format=csv",
-            help="File → Share → Publish to web → CSV → Copy URL",
-            key="sheets_url",
-        )
-        if sheets_url:
-            st.success("✓ ตั้งค่า Sheets แล้ว")
-        else:
-            st.info("ยังไม่มี URL → ข้ามกฎ Sheets")
+    # แสดงสถานะความพร้อมของระบบ
+    st.markdown("### 🟢 สถานะระบบ")
+    if api_key:
+        st.success("✓ ระบบ AI พร้อมใช้งาน", icon="🤖")
+    else:
+        st.warning("⚠️ ยังไม่ได้ตั้งค่า AI Key ใน Secrets", icon="⚠️")
+
+    # แสดงสถานะฐานข้อมูลคำทับศัพท์ทางการ (1,561 คำ)
+    import database_manager as dm
+    total_vocab = dm.get_total_count()
+    st.success(f"✓ ฐานข้อมูลคำทับศัพท์ทางการ: {total_vocab:,} คำ", icon="📚")
+
+    if sheets_url:
+        st.caption("📊 มีการเชื่อมต่อ Google Sheets เสริม")
 
     st.divider()
 
-    # เปิด/ปิดกฎ
+    # เปิด/ปิดกฎการตรวจสอบ
     st.markdown("### 📏 กฎการตรวจสอบ")
     rule_overrides: dict = {}
     for rk, rc in RULES_CONFIG.items():
@@ -181,27 +174,14 @@ with st.sidebar:
 
     st.divider()
 
-    # แสดงลำดับโมเดล
-    with st.expander("🤖 ลำดับ AI Fallback"):
-        for i, m in enumerate(GEMINI_MODELS, 1):
-            icon = "🥇" if i == 1 else ("🥈" if i == 2 else "🥉")
-            st.markdown(f"{icon} `{m}`")
-
-    # วิธีใช้
-    with st.expander("ℹ️ วิธีใช้งาน"):
+    # คำแนะนำวิธีใช้งาน
+    with st.expander("ℹ️ คำแนะนำการใช้งาน", expanded=True):
         st.markdown("""
-**ขั้นตอน:**
-1. ใส่ Gemini API Key
-2. ใส่ Google Sheets CSV URL
-3. อัปโหลดไฟล์ .docx
-4. กด **เริ่มตรวจสอบ**
-5. ดูผลในตาราง → Copy Snippet → Ctrl+F ใน Word
-
-**โครงสร้าง Google Sheets (4 คอลัมน์):**
-`incorrect_word` | `correct_word` | `note` | `type`
-
-- type = `vocabulary` สำหรับศัพท์บัญญัติ
-- type = `transliteration` สำหรับคำทับศัพท์
+**วิธีใช้งานง่ายๆ 3 ขั้นตอน:**
+1. **อัปโหลดไฟล์ .docx** รายงานการประชุมวุฒิสภา
+2. เลือกเปิด/ปิดกฎการตรวจที่ต้องการด้านซ้าย
+3. กดปุ่ม **เริ่มตรวจสอบ** 🚀
+4. ในตารางผลลัพธ์ กดปุ่ม **📋 Copy** เพื่อนำข้อความแวดล้อมไปกด `Ctrl + F` ค้นหาจุดผิดในไฟล์ Word ได้ทันที
         """)
 
 # ============================================================
@@ -325,31 +305,38 @@ if st.session_state.check_results is not None:
         f"| ไฟล์: `{filename}`"
     )
 
-    # Filters
-    st.markdown("### 🔎 กรองผลลัพธ์")
-    fc1, fc2, fc3, fc4 = st.columns([2, 2, 2, 1])
-    with fc1:
-        all_labels = sorted(set(i["rule_label"] for i in issues))
-        filter_rule = st.multiselect("ประเภทปัญหา", all_labels, default=all_labels)
-    with fc2:
-        search_word = st.text_input("ค้นหาคำ", placeholder="คำที่ต้องการค้น...")
-    with fc3:
-        max_para = max((i["para_index"] for i in issues), default=1)
-        para_range = st.slider("ช่วงย่อหน้า", 1, max_para, (1, max_para))
-    with fc4:
-        sort_by = st.selectbox("เรียงตาม", ["ย่อหน้า", "ประเภท"])
+    if not issues:
+        st.success("🎉 ยินดีด้วย! ตรวจสอบครบทุกย่อหน้า 100% แล้ว ไม่พบข้อผิดพลาดตามเกณฑ์ที่เลือก")
+        filtered = []
+    else:
+        # Filters
+        st.markdown("### 🔎 กรองผลลัพธ์")
+        fc1, fc2, fc3, fc4 = st.columns([2, 2, 2, 1])
+        with fc1:
+            all_labels = sorted(set(i["rule_label"] for i in issues))
+            filter_rule = st.multiselect("ประเภทปัญหา", all_labels, default=all_labels)
+        with fc2:
+            search_word = st.text_input("ค้นหาคำ", placeholder="คำที่ต้องการค้น...")
+        with fc3:
+            max_para = max((i["para_index"] for i in issues), default=1)
+            if max_para > 1:
+                para_range = st.slider("ช่วงย่อหน้า", 1, max_para, (1, max_para))
+            else:
+                para_range = (1, 1)
+        with fc4:
+            sort_by = st.selectbox("เรียงตาม", ["ย่อหน้า", "ประเภท"])
 
-    # Apply filters
-    filtered = [
-        i for i in issues
-        if i["rule_label"] in filter_rule
-        and para_range[0] <= i["para_index"] <= para_range[1]
-        and (not search_word or search_word.lower() in (i["wrong_word"] + i["snippet"]).lower())
-    ]
-    if sort_by == "ประเภท":
-        filtered.sort(key=lambda x: (x["rule_label"], x["para_index"]))
+        # Apply filters
+        filtered = [
+            i for i in issues
+            if i["rule_label"] in filter_rule
+            and para_range[0] <= i["para_index"] <= para_range[1]
+            and (not search_word or search_word.lower() in (i["wrong_word"] + i["snippet"]).lower())
+        ]
+        if sort_by == "ประเภท":
+            filtered.sort(key=lambda x: (x["rule_label"], x["para_index"]))
 
-    st.markdown(f"**แสดง {len(filtered)} รายการ** จากทั้งหมด {len(issues)} รายการ")
+        st.markdown(f"**แสดง {len(filtered)} รายการ** จากทั้งหมด {len(issues)} รายการ")
 
     # Export
     if filtered:

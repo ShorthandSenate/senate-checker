@@ -239,55 +239,130 @@ def check_spelling_ai(
 
 
 # ============================================================
-# 7. กฎที่ 2 + 4: ตรวจศัพท์บัญญัติ และคำทับศัพท์ (Google Sheets)
+# 7. กฎที่ 2 + 4: ตรวจศัพท์บัญญัติ และคำทับศัพท์ (Local DB + Google Sheets)
 # ============================================================
+
+import database_manager as dm
 
 def check_vocabulary_and_transliteration(
     paragraphs: list,
-    vocab_db: list,
+    sheets_vocab_db: Optional[list] = None,
 ) -> list:
     """
-    ตรวจหาคำที่ควรเปลี่ยนตาม Google Sheets
-    รองรับทั้ง vocabulary และ transliteration (แยกด้วยคอลัมน์ type)
+    ตรวจหาคำที่ไม่ตรงตามฐานข้อมูลคำทับศัพท์ทางการ (1,561 คำ) และศัพท์บัญญัติ:
+    1. ตรวจจับคำภาษาอังกฤษที่ปรากฏในข้อความ เพื่อแนะนำคำทับศัพท์ไทยทางการ
+    2. ตรวจจับคำทับศัพท์ไทยที่สะกดผิดตามหลักราชบัณฑิตยสภา/วุฒิสภา
+    3. ผสานข้อมูลจาก Google Sheets (ถ้ามี)
     """
-    if not vocab_db:
+    # 1. โหลดฐานข้อมูลหลักจาก Local Database
+    vocab_lookup = dm.get_engine_lookup_db()
+
+    # 2. ผสานจาก Google Sheets ถ้ามี
+    if sheets_vocab_db:
+        for row in sheets_vocab_db:
+            incorrect = row.get("incorrect_word", "").strip()
+            correct = row.get("correct_word", "").strip()
+            note = row.get("note", "").strip()
+            word_type = row.get("type", "vocabulary").strip().lower()
+            if incorrect:
+                is_en = bool(re.match(r"^[A-Za-z\s\-_0-9]+$", incorrect))
+                vocab_lookup[incorrect] = {
+                    "correct": correct,
+                    "note": note or f"ตามฐานข้อมูล Google Sheets (แก้ไขเป็น {correct})",
+                    "type": word_type,
+                    "is_english": is_en,
+                }
+
+    if not vocab_lookup:
         return []
 
     issues = []
-    # สร้าง lookup dict
-    vocab_lookup = {}
-    for row in vocab_db:
-        incorrect = row.get("incorrect_word", "").strip()
-        correct = row.get("correct_word", "").strip()
-        note = row.get("note", "").strip()
-        word_type = row.get("type", "vocabulary").strip().lower()
-        if incorrect:
-            vocab_lookup[incorrect] = {
-                "correct": correct,
-                "note": note,
-                "type": word_type,
-            }
+
+    # จัดเรียงคำค้นหาจากยาวไปสั้น เพื่อให้จับคำประสมที่ยาวกว่าก่อนเสมอ (Longest Match First)
+    # เช่น "soft power" ก่อน "power", "สมาร์ทโฟน" ก่อน "สมาร์ท"
+    sorted_lookup_items = sorted(
+        vocab_lookup.items(),
+        key=lambda x: len(x[0]),
+        reverse=True
+    )
 
     for p in paragraphs:
         text = p["text"]
-        for wrong_word, info in vocab_lookup.items():
-            if wrong_word in text:
-                rule_type = (
-                    "transliteration" if info["type"] == "transliteration" else "vocabulary"
-                )
-                if not RULES_CONFIG.get(rule_type, {}).get("enabled", True):
-                    continue
-                issues.append({
-                    "rule": rule_type,
-                    "rule_label": RULES_CONFIG[rule_type]["label"],
-                    "para_index": p["index"] + 1,
-                    "page_hint": p["page_hint"],
-                    "wrong_word": wrong_word,
-                    "correct_word": info["correct"],
-                    "reason": info["note"] or "ตามฐานข้อมูล Google Sheets",
-                    "snippet": build_context_snippet(text, wrong_word),
-                    "color": RULES_CONFIG[rule_type]["color"],
-                })
+        para_idx = p["index"] + 1
+
+        # เก็บช่วงตัวอักษร (start, end) ที่ถูกตรวจพบไปแล้ว เพื่อไม่ให้ตรวจซ้ำในคำย่อย
+        covered_spans = []
+
+        # หาช่วงคำในวงเล็บภาษาอังกฤษ (เช่น เพื่อขยายความคำไทยอย่างถูกต้อง)
+        paren_spans = []
+        for m in re.finditer(r"\([A-Za-z0-9\s\-_/]+\)", text):
+            paren_spans.append((m.start(), m.end()))
+
+        for wrong_key, info in sorted_lookup_items:
+            rule_type = (
+                "transliteration" if info.get("type") == "transliteration" else "vocabulary"
+            )
+            if not RULES_CONFIG.get(rule_type, {}).get("enabled", True):
+                continue
+
+            if info.get("is_english"):
+                # ตรวจคำภาษาอังกฤษแบบเต็มคำ (Word Boundary)
+                pattern = rf"\b{re.escape(wrong_key)}\b"
+                for m in re.finditer(pattern, text, re.IGNORECASE):
+                    start, end = m.start(), m.end()
+
+                    # ข้ามหากอยู่ในวงเล็บขยายความคำแปล
+                    in_paren = any(p_start <= start and end <= p_end for p_start, p_end in paren_spans)
+                    if in_paren:
+                        continue
+
+                    # ข้ามหากช่วงนี้ถูกครอบคลุมโดยคำประสมที่ยาวกว่าแล้ว
+                    is_covered = any(c_start <= start and end <= c_end for c_start, c_end in covered_spans)
+                    if is_covered:
+                        continue
+
+                    covered_spans.append((start, end))
+                    matched_str = m.group()
+
+                    issues.append({
+                        "rule": rule_type,
+                        "rule_label": RULES_CONFIG[rule_type]["label"],
+                        "para_index": para_idx,
+                        "page_hint": p["page_hint"],
+                        "wrong_word": matched_str,
+                        "correct_word": info["correct"],
+                        "reason": info["note"],
+                        "snippet": build_context_snippet(text, matched_str),
+                        "color": RULES_CONFIG[rule_type]["color"],
+                    })
+            else:
+                # คำภาษาไทย (เช่น คำทับศัพท์ที่สะกดผิด)
+                start_pos = 0
+                while True:
+                    idx = text.find(wrong_key, start_pos)
+                    if idx == -1:
+                        break
+                    start, end = idx, idx + len(wrong_key)
+                    start_pos = end
+
+                    # ข้ามหากช่วงนี้ถูกครอบคลุมโดยคำที่ยาวกว่าแล้ว
+                    is_covered = any(c_start <= start and end <= c_end for c_start, c_end in covered_spans)
+                    if is_covered:
+                        continue
+
+                    covered_spans.append((start, end))
+
+                    issues.append({
+                        "rule": rule_type,
+                        "rule_label": RULES_CONFIG[rule_type]["label"],
+                        "para_index": para_idx,
+                        "page_hint": p["page_hint"],
+                        "wrong_word": wrong_key,
+                        "correct_word": info["correct"],
+                        "reason": info["note"],
+                        "snippet": build_context_snippet(text, wrong_key),
+                        "color": RULES_CONFIG[rule_type]["color"],
+                    })
 
     return issues
 
@@ -373,12 +448,15 @@ def run_full_check(
 
     all_issues: list = []
 
-    # --- Step 2: โหลด Google Sheets ---
-    vocab_db: list = []
+    # --- Step 2: เตรียมฐานข้อมูลคำทับศัพท์ (Local DB + Google Sheets) ---
+    local_count = dm.get_total_count()
+    sheets_vocab_db: list = []
     if sheets_url and sheets_url.startswith("http"):
-        upd("📊 โหลดฐานข้อมูล Google Sheets...")
-        vocab_db = load_vocabulary_db(sheets_url)
-        upd(f"✓ โหลด {len(vocab_db)} รายการจาก Sheets")
+        upd("📊 โหลดฐานข้อมูลเสริมจาก Google Sheets...")
+        sheets_vocab_db = load_vocabulary_db(sheets_url)
+        upd(f"✓ โหลดฐานข้อมูลทางการ {local_count} คำ + Sheets {len(sheets_vocab_db)} คำ")
+    else:
+        upd(f"✓ โหลดฐานข้อมูลคำทับศัพท์ทางการ {local_count} คำ (พร้อมตรวจ)")
 
     # --- Step 3: กฎวงเล็บซ้ำ (เร็ว ไม่ต้องใช้ AI) ---
     if progress_bar:
@@ -388,13 +466,13 @@ def run_full_check(
     all_issues.extend(paren_issues)
     upd(f"✓ วงเล็บซ้ำ: พบ {len(paren_issues)} รายการ")
 
-    # --- Step 4: กฎ Vocabulary + Transliteration (จาก Sheets) ---
+    # --- Step 4: กฎคำทับศัพท์และศัพท์บัญญัติ (เทียบกับฐานข้อมูลทางการ) ---
     if progress_bar:
         progress_bar.progress(0.15, text="ตรวจศัพท์บัญญัติและคำทับศัพท์...")
-    upd("📚 ตรวจศัพท์บัญญัติและคำทับศัพท์...")
-    vocab_issues = check_vocabulary_and_transliteration(paragraphs, vocab_db)
+    upd("📚 ตรวจศัพท์บัญญัติและคำทับศัพท์เทียบฐานข้อมูล...")
+    vocab_issues = check_vocabulary_and_transliteration(paragraphs, sheets_vocab_db)
     all_issues.extend(vocab_issues)
-    upd(f"✓ ศัพท์บัญญัติ/ทับศัพท์: พบ {len(vocab_issues)} รายการ")
+    upd(f"✓ คำทับศัพท์/ศัพท์บัญญัติ: ตรวจพบ {len(vocab_issues)} รายการ")
 
     # --- Step 5: กฎคำผิดทั่วไปด้วย AI (Batch + Fallback) ---
     if api_key and RULES_CONFIG["spelling"]["enabled"]:
