@@ -91,8 +91,19 @@ st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Sarabun:wght@400;600;700&display=swap');
 
-html, body, [class*="css"], .stMarkdown, .stText, h1, h2, h3, h4, p, span, div {
-    font-family: 'Sarabun', 'Leelawadee UI', 'Tahoma', 'Thonburi', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
+html, body, [class*="css"], .stMarkdown, .stText, h1, h2, h3, h4, p, label, input, textarea {
+    font-family: 'Sarabun', 'Leelawadee UI', 'Tahoma', 'Thonburi', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+
+/* คืนค่าฟอนต์ไอคอนให้ Streamlit ป้องกันตัวอักษร upload หรือไอคอนอื่นทับซ้อน */
+[data-testid*="stIcon"],
+[class*="material-symbols"],
+[class*="material-icons"],
+.material-symbols-rounded,
+.material-icons,
+button span,
+[data-testid="stFileUploadDropzone"] span {
+    font-family: 'Material Symbols Rounded', 'Material Icons', sans-serif !important;
 }
 
 /* Header */
@@ -204,7 +215,12 @@ footer { visibility: hidden; }
 # ============================================================
 st.markdown("""
 <div class="main-header">
-    <h1>📋 ระบบตรวจรายงานการประชุมวุฒิสภา</h1>
+    <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
+        <h1 style="margin: 0;">📋 ระบบตรวจรายงานการประชุมวุฒิสภา</h1>
+        <span style="font-size: 0.82rem; background: rgba(255, 255, 255, 0.18); padding: 4px 12px; border-radius: 20px; font-weight: 500; letter-spacing: 0.3px;">
+            🕒 อัปเดตล่าสุด: 11 ก.ย. 2569 | 10:00 น.
+        </span>
+    </div>
 </div>
 """, unsafe_allow_html=True)
 
@@ -215,17 +231,11 @@ st.markdown("""
 # ============================================================
 # File Upload
 # ============================================================
-col_up, col_info = st.columns([3, 1])
-with col_up:
-    uploaded_file = st.file_uploader(
-        "📂 อัปโหลดไฟล์รายงานการประชุม (.docx)",
-        type=["docx"],
-        help=f"ขนาดไฟล์สูงสุด {MAX_FILE_SIZE_MB} MB",
-    )
-with col_info:
-    if uploaded_file:
-        sz = uploaded_file.size / (1024 * 1024)
-        st.metric("ขนาดไฟล์", f"{sz:.1f} MB")
+uploaded_file = st.file_uploader(
+    "📂 อัปโหลดไฟล์รายงานการประชุม (.docx)",
+    type=["docx"],
+    help=f"ขนาดไฟล์สูงสุด {MAX_FILE_SIZE_MB} MB",
+)
 
 # ============================================================
 # Session State
@@ -404,98 +414,43 @@ if st.session_state.check_results is not None:
     if not filtered:
         st.info("ℹ️ ไม่พบปัญหาตามเงื่อนไขที่เลือกกรอง")
     else:
+        # จัดกลุ่มหน้าที่พบปัญหา
+        unique_pages = []
+        for i in filtered:
+            pc = i.get("page_code") or f"หน้า {i.get('page_hint', 1)}"
+            if pc not in unique_pages:
+                unique_pages.append(pc)
+        
+        if len(unique_pages) > 1:
+            pages_str = ", ".join(unique_pages[:-1]) + f" และ {unique_pages[-1]}"
+        elif len(unique_pages) == 1:
+            pages_str = unique_pages[0]
+        else:
+            pages_str = "-"
+            
+        report_md = f"**พบข้อผิดพลาดในหน้า:** {pages_str}\n\n"
+        report_md += "**รายงานการตรวจทานเอกสาร:**\n\n"
+        
         for idx, issue in enumerate(filtered):
-            color       = issue["color"]
-            wrong       = issue["wrong_word"]
-            correct     = issue["correct_word"]
-            reason      = issue["reason"]
-            snippet     = issue["snippet"]
-            label       = issue["rule_label"]
-            para        = issue["para_index"]
-            page_code   = issue.get("page_code") or f"~หน้า {issue.get('page_hint', 1)}"
+            wrong = issue["wrong_word"]
+            correct = issue["correct_word"]
+            reason = issue["reason"]
+            para = issue["para_index"]
+            page_code = issue.get("page_code") or f"หน้า {issue.get('page_hint', 1)}"
             full_header = issue.get("full_header") or ""
+            
+            pos_str = f"{full_header}" if full_header else f"{page_code}"
+            
+            report_md += f"o  **หน้า / ตำแหน่ง:** {pos_str} (ย่อหน้าที่ {para})\n"
+            report_md += f"o  **จุดที่ผิด:** ❌ 🔴 {wrong}\n"
+            report_md += f"o  **แก้ไขเป็น:** ✅ 🟢 {correct}\n"
+            report_md += f"o  **เหตุผล/คำแนะนำ:** {reason}\n\n"
+            
+        st.markdown(report_md)
+        
+        st.markdown("---")
+        st.text_area("📋 **คัดลอกรายงานทั้งหมดที่นี่ (Ctrl+A แล้ว Ctrl+C):**", value=report_md, height=400)
 
-            # Highlight visual diff between wrong and correct
-            diff_w, diff_c = render_diff_html(wrong, correct)
-
-            # Highlight ใน snippet
-            snippet_display = snippet.replace(
-                f"[{wrong}]",
-                f"<b style='background:#fff3cd;color:#c0392b;padding:1px 4px;border-radius:3px;border-bottom:2px solid #e67e22;'>{wrong}</b>"
-            )
-            if f"[{wrong}]" not in snippet:
-                snippet_display = snippet.replace(
-                    wrong,
-                    f"<b style='background:#fff3cd;color:#c0392b;padding:1px 4px;border-radius:3px;border-bottom:2px solid #e67e22;'>{wrong}</b>",
-                    1,
-                )
-
-            with st.container():
-                c1, c2, c3, c4, c5, c6 = st.columns([0.4, 1.4, 1.4, 1.4, 2.6, 0.8])
-
-                with c1:
-                    st.markdown(f"**#{idx+1}**")
-
-                with c2:
-                    hdr_tooltip = f"หัวแผ่นฉบับเต็ม: {full_header}" if full_header else f"หน้าที่ {page_code}"
-                    st.markdown(
-                        f'''
-                        <div class="page-header-box" title="{hdr_tooltip}">
-                            <div class="page-header-title">📄 หัวแผ่นกระดาษ</div>
-                            <div class="page-header-code">{page_code}</div>
-                        </div>
-                        <span class="rule-badge" style="background:{color}">{label}</span><br>
-                        <small style="color:#666;">ย่อหน้าที่ <b>{para}</b></small>
-                        ''',
-                        unsafe_allow_html=True,
-                    )
-
-                with c3:
-                    st.markdown(
-                        f'''
-                        <div class="wrong-box">
-                            <div class="word-label">❌ คำที่พบในเอกสาร</div>
-                            <div class="wrong-word">{diff_w}</div>
-                        </div>
-                        ''',
-                        unsafe_allow_html=True,
-                    )
-
-                with c4:
-                    st.markdown(
-                        f'''
-                        <div class="correct-box">
-                            <div class="word-label">✅ แก้ไขเป็น</div>
-                            <div class="correct-word">{diff_c}</div>
-                            <div style="font-size:0.75rem;color:#4a5568;margin-top:4px;line-height:1.3;">{reason}</div>
-                        </div>
-                        ''',
-                        unsafe_allow_html=True,
-                    )
-
-                with c5:
-                    st.markdown(
-                        f'<div class="snippet-box">{snippet_display}</div>',
-                        unsafe_allow_html=True,
-                    )
-
-                with c6:
-                    if st.button("📋 Copy", key=f"cp_{idx}", use_container_width=True,
-                                 help="คัดลอก snippet ไปใช้ Ctrl+F ใน Word"):
-                        st.session_state[f"show_cp_{idx}"] = not st.session_state.get(f"show_cp_{idx}", False)
-
-                    if st.session_state.get(f"show_cp_{idx}"):
-                        clean_snippet = snippet.replace(f"[{wrong}]", wrong)
-                        st.text_area(
-                            "Ctrl+A แล้ว Ctrl+C:",
-                            value=clean_snippet,
-                            height=70,
-                            key=f"ta_{idx}",
-                            label_visibility="collapsed",
-                        )
-
-                if idx < len(filtered) - 1:
-                    st.markdown('<hr style="margin:0.4rem 0;border-color:#eee">', unsafe_allow_html=True)
 
 # ============================================================
 # Empty State
@@ -505,7 +460,5 @@ elif not uploaded_file:
     <div style="text-align:center;padding:3rem 1rem;color:#aaa">
         <div style="font-size:5rem">📄</div>
         <h3 style="color:#bbb;font-weight:400">อัปโหลดไฟล์ .docx เพื่อเริ่มตรวจสอบ</h3>
-        <p>รองรับรายงานการประชุมวุฒิสภา ขนาดสูงสุด 100 MB (200+ หน้า)<br>
-        ระบบตรวจสอบ 100% Deterministic: คำผิด | วงเล็บซ้ำ | บังคับวงเล็บครั้งแรก | คำทับศัพท์ | ระเบียบวุฒิสภา | ชื่อ สว. (วรรค ๒ เคาะ) | ระเบียบสำนักกรรมาธิการ ๓</p>
     </div>
     """, unsafe_allow_html=True)

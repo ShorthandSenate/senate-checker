@@ -80,8 +80,8 @@ def read_docx_paragraphs(file_bytes: bytes) -> list:
 
     for p in doc.paragraphs:
         t = _get_paragraph_text_accepted(p)
-        # Normalize ช่องไฟซ้ำที่เกิดจาก soft break หรือ whitespace ท้าย/ต้น
-        t = re.sub(r'[ \t]+', ' ', t).strip()
+        # ไม่ยุบช่องไฟซ้ำ (ไม่ใช้ re.sub) เพื่อรักษาวรรคใหญ่ (๒ เคาะ) ให้คงอยู่ตามที่พิมพ์จริง
+        t = t.strip()
         if t:
             raw_paras.append((p, t))
 
