@@ -10,6 +10,8 @@ import logging
 
 from docx import Document
 from docx.oxml.ns import qn
+from docx.text.paragraph import Paragraph
+from docx.table import Table
 
 from config import (
     CONTEXT_WORDS,
@@ -26,11 +28,18 @@ logger = logging.getLogger(__name__)
 #    รองรับ: Soft Break, Track Changes, หัวแผ่นกระดาษ
 # ============================================================
 
+# ============================================================
+# 1. อ่านไฟล์ Word และแยกย่อหน้า ครบถ้วน 100%
+#    รองรับ: ย่อหน้าปกติ, ตาราง (ทุกแถว/เซลล์), กล่องข้อความ,
+#           หัว/ท้ายกระดาษ, Soft Break, Tab, Track Changes
+# ============================================================
+
 SENATE_HEADER_REGEX = re.compile(
-    r'^(ว\.\s*[\d๑-๙]+(?:\s*\([^\)]+\))?)\\s+(.+?)\s*([\d๑-๙]+/[\d๑-๙]+(?:\s*\([^\)]+\))?)$'
+    r'^(ว\.\s*[\d๑-๙]+(?:\s*\([^\)]+\))?)\s+([ก-๙A-Za-z\s]+?)\s+([\d๑-๙]+/[\d๑-๙]+(?:\s*\([^\)]+\))?)$'
 )
-FALLBACK_HEADER_REGEX = re.compile(
-    r'^([ก-๙A-Za-z\s]+?)\s+([\d๑-๙]+/[\d๑-๙]+(?:\s*\([^\)]+\))?)$'
+# รูปแบบหัวแผ่นชวเลข เช่น จันทร์ตรี ๓/๑, ศุกร์เอก ๒/๑, อังคาร ๑/๒
+STENO_PAGE_H = re.compile(
+    r'^([ก-๙]+(?:เอก|โท|ตรี|จัตวา)?)\s+([\d๑-๙]+/[\d๑-๙]+(?:\s*\([^\)]+\))?)$'
 )
 
 
@@ -38,8 +47,10 @@ def _get_paragraph_text_accepted(para) -> str:
     """
     ดึงข้อความจากย่อหน้า โดย:
     1. ยอมรับเฉพาะข้อความที่ "ยังอยู่" (ไม่รวม Track Changes ที่ถูกลบ)
-    2. รวม Soft Break (Shift+Enter / w:br) ให้เป็นช่องไฟเดียว ไม่ตัดคำ
-    3. ข้ามข้อความใน w:del (Tracked Deletion) อย่างสมบูรณ์
+    2. รวม Soft Break (Shift+Enter / w:br) และ Carriage Return (w:cr) ให้เป็นช่องไฟเดียว ไม่ตัดคำ
+    3. รวม Tab (w:tab) ให้เป็นช่องไฟ ป้องกันคำหน้า-หลังแท็บชนติดกัน
+    4. แปลง Non-breaking hyphen (w:noBreakHyphen) เป็น '-'
+    5. ข้ามข้อความใน w:del (Tracked Deletion) อย่างสมบูรณ์
     """
     text_parts = []
 
@@ -47,16 +58,30 @@ def _get_paragraph_text_accepted(para) -> str:
         tag = elem.tag
 
         # ข้าม Track Changes ส่วนที่ถูก "ลบ" (w:del) — ใช้ข้อความ "หลังแก้ไข" เท่านั้น
-        # ข้ามทั้ง subtree ของ w:del โดยใช้ ancestor check
         ancestors = [e.tag for e in elem.iterancestors()]
         if any(a == qn('w:del') for a in ancestors):
             continue
 
-        # Soft Break (Shift+Enter) → แทนด้วยช่องไฟ 1 ช่อง ไม่ให้ตัดคำ
+        # Soft Break (Shift+Enter)
         if tag == qn('w:br'):
             br_type = elem.get(qn('w:type'), '')
-            if br_type != 'page':  # page break ข้ามไปเลย
+            if br_type != 'page':  # page break ข้ามไปเลย (นับแยก)
                 text_parts.append(' ')
+            continue
+
+        # Carriage return break (w:cr)
+        if tag == qn('w:cr'):
+            text_parts.append(' ')
+            continue
+
+        # Tab (w:tab) -> ใส่ช่องไฟเพื่อไม่ให้คำชนติดกัน
+        if tag == qn('w:tab'):
+            text_parts.append(' ')
+            continue
+
+        # Non-breaking hyphen
+        if tag == qn('w:noBreakHyphen'):
+            text_parts.append('-')
             continue
 
         # ดึงข้อความปกติจาก w:t
@@ -70,37 +95,96 @@ def _get_paragraph_text_accepted(para) -> str:
 
 def read_docx_paragraphs(file_bytes: bytes) -> list:
     """
-    อ่านไฟล์ .docx ครบถ้วน 100% ทุกย่อหน้า พร้อม:
-    - สกัดหัวแผ่นกระดาษ (เช่น จันทร์ตรี ๓/๑) แบบแม่นยำ
+    อ่านไฟล์ .docx ครบถ้วน 100% ทุกย่อหน้า ทุกตาราง ทุกกล่องข้อความ และทุกหน้า:
+    - อ่านย่อหน้าปกติในเนื้อหา (Body Paragraphs)
+    - อ่านตารางทั้งหมด (Tables) ทุกแถว ทุกคอลัมน์ ทุกเซลล์
+    - อ่านกล่องข้อความ (Textboxes / Shapes)
+    - อ่านส่วนหัวและท้ายกระดาษ (Headers / Footers)
+    - สกัดหัวแผ่นกระดาษชวเลข (เช่น จันทร์ตรี ๓/๑) แบบแม่นยำ
+    - รองรับตัวตัดหน้าจริง (<w:lastRenderedPageBreak/> และ <w:br w:type="page"/>)
     - รองรับ Track Changes (ใช้เฉพาะข้อความที่ยังอยู่หลังแก้ไข)
-    - รองรับ Soft Break (Shift+Enter) โดยรวมเป็นช่องไฟ ไม่ตัดคำ
-    คืนค่า list ของ dict: {index, text, page_code, full_header, is_header}
+    - รองรับ Soft Break (Shift+Enter), Carriage Return (w:cr) และ Tab (w:tab)
+    คืนค่า list ของ dict: {index, text, page_code, full_header, is_header, loc_hint}
     """
     doc = Document(io.BytesIO(file_bytes))
     raw_paras = []
+    seen_elements = set()
+    page_counter = 1
 
-    for p in doc.paragraphs:
-        t = _get_paragraph_text_accepted(p)
-        # ไม่ยุบช่องไฟซ้ำ (ไม่ใช้ re.sub) เพื่อรักษาวรรคใหญ่ (๒ เคาะ) ให้คงอยู่ตามที่พิมพ์จริง
-        t = t.strip()
-        if t:
-            raw_paras.append((p, t))
+    # 1. วนลูปอ่าน block elements ใน body ตามลำดับจริงที่ปรากฏในเอกสาร
+    for child in doc.element.body.iterchildren():
+        # ตรวจจับการตัดหน้าก่อนหรือใน block
+        if child.xpath('.//w:lastRenderedPageBreak | .//w:br[@w:type="page"]'):
+            page_counter += len(child.xpath('.//w:lastRenderedPageBreak | .//w:br[@w:type="page"]'))
 
-    # --- สกัดตำแหน่งหัวแผ่นกระดาษทั้งหมด ---
-    SENATE_H = re.compile(
-        r'^(ว\.\s*[\d๑-๙]+(?:\s*\([^\)]+\))?)\s+(.+?)\s*([\d๑-๙]+/[\d๑-๙]+(?:\s*\([^\)]+\))?)$'
-    )
-    FALLBACK_H = re.compile(
-        r'^([ก-๙A-Za-z\s]+?)\s+([\d๑-๙]+/[\d๑-๙]+(?:\s*\([^\)]+\))?)$'
-    )
+        # ย่อหน้าปกติ
+        if child.tag == qn('w:p'):
+            seen_elements.add(child)
+            p = Paragraph(child, doc)
+            t = _get_paragraph_text_accepted(p)
+            if t:
+                raw_paras.append((p, t, "body", "", page_counter))
 
+        # ตาราง (Table) — อ่านทุกแถว ทุกคอลัมน์ ทุกเซลล์
+        elif child.tag == qn('w:tbl'):
+            tbl = Table(child, doc)
+            seen_tc = set()
+            for r_idx, row in enumerate(tbl.rows):
+                for c_idx, cell in enumerate(row.cells):
+                    if cell._tc in seen_tc:
+                        continue
+                    seen_tc.add(cell._tc)
+                    for cell_p in cell.paragraphs:
+                        seen_elements.add(cell_p._element)
+                        t = _get_paragraph_text_accepted(cell_p)
+                        if t:
+                            loc_hint = f"ตาราง แถวที่ {r_idx+1} คอลัมน์ที่ {c_idx+1}"
+                            raw_paras.append((cell_p, t, "table", loc_hint, page_counter))
+
+        # Structured Document Tags (SDT / Content Controls)
+        elif child.tag == qn('w:sdt'):
+            for p_elem in child.xpath('.//w:p'):
+                if p_elem not in seen_elements:
+                    seen_elements.add(p_elem)
+                    p = Paragraph(p_elem, doc)
+                    t = _get_paragraph_text_accepted(p)
+                    if t:
+                        raw_paras.append((p, t, "body", "", page_counter))
+
+    # 2. อ่านกล่องข้อความ (Textboxes ใน Drawing/Shapes) ที่อาจอยู่นอกโฟลว์ปกติ
+    for tb_p_elem in doc.element.body.xpath('.//w:txbxContent//w:p'):
+        if tb_p_elem not in seen_elements:
+            seen_elements.add(tb_p_elem)
+            p = Paragraph(tb_p_elem, doc)
+            t = _get_paragraph_text_accepted(p)
+            if t:
+                raw_paras.append((p, t, "textbox", "กล่องข้อความ", page_counter))
+
+    # 3. อ่าน Header และ Footer (ถ้ามี)
+    for s_idx, sec in enumerate(doc.sections):
+        if sec.header:
+            for hp in sec.header.paragraphs:
+                if hp._element not in seen_elements:
+                    seen_elements.add(hp._element)
+                    t = _get_paragraph_text_accepted(hp)
+                    if t:
+                        raw_paras.append((hp, t, "header", f"หัวกระดาษ ส่วนที่ {s_idx+1}", page_counter))
+        if sec.footer:
+            for fp in sec.footer.paragraphs:
+                if fp._element not in seen_elements:
+                    seen_elements.add(fp._element)
+                    t = _get_paragraph_text_accepted(fp)
+                    if t:
+                        raw_paras.append((fp, t, "footer", f"ท้ายกระดาษ ส่วนที่ {s_idx+1}", page_counter))
+
+    # --- สกัดตำแหน่งหัวแผ่นกระดาษชวเลขทั้งหมด ---
     headers_map = {}
     first_header_info = None
 
-    for idx, (p, text) in enumerate(raw_paras):
-        m = SENATE_H.match(text)
+    for idx, (p, text, block_type, loc_hint, pg_cnt) in enumerate(raw_paras):
+        m = SENATE_HEADER_REGEX.match(text)
         if not m:
-            m = FALLBACK_H.match(text)
+            m = STENO_PAGE_H.match(text)
         if m:
             if len(m.groups()) == 3:
                 session = m.group(1).strip()
@@ -141,28 +225,38 @@ def read_docx_paragraphs(file_bytes: bytes) -> list:
 
     current_page_code = default_page_code
     current_full_header = default_full_header
-    page_count = 1
+    has_shorthand_header = bool(headers_map)
 
     paragraphs = []
-    for idx, (p, text) in enumerate(raw_paras):
+    for idx, (p, text, block_type, loc_hint, pg_cnt) in enumerate(raw_paras):
         is_header = False
         if idx in headers_map:
             current_page_code = headers_map[idx]["page_code"]
             current_full_header = headers_map[idx]["full_header"]
             is_header = True
-            page_count += 1
+        elif not has_shorthand_header:
+            # ถ้าเอกสารนี้ไม่มีหัวแผ่นชวเลข ให้ใช้เลขหน้าจริงจากการตัดหน้า (Page Break)
+            current_page_code = f"หน้า {pg_cnt}"
+            current_full_header = f"หน้า {pg_cnt}"
+
+        # ถ้าอยู่ในตารางหรือกล่องข้อความ ให้เพิ่มตำแหน่งบอกผู้ตรวจให้ค้นหาใน Word ได้ทันที
+        display_pos = current_full_header
+        if loc_hint:
+            display_pos = f"{current_full_header} ({loc_hint})"
 
         paragraphs.append({
             "index": idx,
             "text": text,
             "page_code": current_page_code,
-            "full_header": current_full_header,
+            "full_header": display_pos,
             "page_hint": current_page_code,
-            "page_num": page_count,
+            "page_num": pg_cnt,
             "is_header": is_header,
+            "block_type": block_type,
+            "loc_hint": loc_hint,
         })
 
-    logger.info(f"อ่านไฟล์สำเร็จ: {len(paragraphs)} ย่อหน้า, {len(headers_map)} หัวแผ่นกระดาษ")
+    logger.info(f"อ่านไฟล์สำเร็จ: {len(paragraphs)} ย่อหน้า/บล็อก, {len(headers_map)} หัวแผ่นชวเลข")
     return paragraphs
 
 
@@ -171,7 +265,7 @@ def read_docx_paragraphs(file_bytes: bytes) -> list:
 # ============================================================
 
 def build_context_snippet(text: str, wrong_word: str, word_count: int = CONTEXT_WORDS) -> str:
-    """ดึงข้อความรอบข้างคำผิด word_count คำทั้งสองข้าง"""
+    """ดึงข้อความรอบข้างคำผิด word_count คำทั้งสองข้าง (ไม่มีเครื่องหมายก้ามปู [])"""
     idx = text.find(wrong_word)
     if idx == -1:
         return (text[:120] + "...") if len(text) > 120 else text
@@ -179,7 +273,13 @@ def build_context_snippet(text: str, wrong_word: str, word_count: int = CONTEXT_
     right_words = text[idx + len(wrong_word):].split()
     left_snippet = " ".join(left_words[-word_count:])
     right_snippet = " ".join(right_words[:word_count])
-    return f"{left_snippet} [{wrong_word}] {right_snippet}".strip()
+    parts = []
+    if left_snippet:
+        parts.append(left_snippet)
+    parts.append(wrong_word)
+    if right_snippet:
+        parts.append(right_snippet)
+    return " ".join(parts).strip()
 
 
 # ============================================================
@@ -225,9 +325,16 @@ MISSPELLING_REASON_MAP = {
     "วิพากวิจารณ์": "คำว่า 'วิพากวิจารณ์' พิมพ์ตก ษ์ ที่ถูกต้องคือ 'วิพากษ์วิจารณ์' ตามพจนานุกรมราชบัณฑิตยสภา",
     "เกมส์": "คำว่า 'เกมส์' สะกดผิดตามราชบัณฑิตยสภา ที่ถูกต้องคือ 'เกม' (ไม่มี ส์)",
     # คำทับศัพท์ทั่วไป
+    "แอคเคาท์": "คำว่า 'แอคเคาท์' เป็นคำทับศัพท์ที่สะกดผิด ที่ถูกต้องตามคู่มือคำทับศัพท์ทางการวุฒิสภา (account) คือ 'แอ็กเคานต์'",
+    "แอคเค้าท์": "คำว่า 'แอคเค้าท์' สะกดผิด ที่ถูกต้องตามคู่มือคำทับศัพท์ทางการวุฒิสภา คือ 'แอ็กเคานต์'",
+    "แอคเค้า": "คำว่า 'แอคเค้า' สะกดผิด ที่ถูกต้องตามคู่มือคำทับศัพท์ทางการวุฒิสภา คือ 'แอ็กเคานต์'",
+    "แอ็คเคาท์": "คำว่า 'แอ็คเคาท์' สะกดผิด ที่ถูกต้องตามคู่มือคำทับศัพท์ทางการวุฒิสภา คือ 'แอ็กเคานต์'",
+    "แอกเคาท์": "คำว่า 'แอกเคาท์' สะกดผิด ที่ถูกต้องตามคู่มือคำทับศัพท์ทางการวุฒิสภา คือ 'แอ็กเคานต์'",
     "สมาร์ท": "คำว่า 'สมาร์ท' สะกดผิดตามหลักราชบัณฑิตยสภา ที่ถูกต้องคือ 'สมาร์ต' (ไม่มีทัณฑฆาต)",
     "แอพ": "คำว่า 'แอพ' สะกดผิด ที่ถูกต้องคือ 'แอป'",
     "แอพพลิเคชัน": "คำว่า 'แอพพลิเคชัน' สะกดผิด ที่ถูกต้องคือ 'แอปพลิเคชัน'",
+    "แอพพลิเคชั่น": "คำว่า 'แอพพลิเคชั่น' สะกดผิด ที่ถูกต้องคือ 'แอปพลิเคชัน'",
+    "แอปพลิเคชั่น": "คำว่า 'แอปพลิเคชั่น' สะกดผิด ที่ถูกต้องคือ 'แอปพลิเคชัน'",
     "ดิจิตอล": "คำว่า 'ดิจิตอล' สะกดผิดตามราชบัณฑิตยสภา ที่ถูกต้องคือ 'ดิจิทัล'",
     "อัพเดท": "คำว่า 'อัพเดท' สะกดผิดตามราชบัณฑิตยสภา ที่ถูกต้องคือ 'อัปเดต'",
     "อัพเดต": "คำว่า 'อัพเดต' สะกดผิด ที่ถูกต้องคือ 'อัปเดต' (อัป ไม่ใช่ อัพ)",
@@ -256,6 +363,65 @@ MISSPELLING_REASON_MAP = {
     "แท็กซี่": "คำว่า 'แท็กซี่' สะกดผิด ที่ถูกต้องคือ 'แท็กซี'",
     "พอยท์": "คำว่า 'พอยท์' สะกดผิด ที่ถูกต้องคือ 'พอยต์'",
     "ปาร์ตี้": "คำว่า 'ปาร์ตี้' สะกดผิดตามราชบัณฑิตยสภา ที่ถูกต้องคือ 'ปาร์ตี'",
+    "อินเตอร์เน็ต": "คำว่า 'อินเตอร์เน็ต' สะกดผิดตามราชบัณฑิตยสภา ที่ถูกต้องคือ 'อินเทอร์เน็ต'",
+    "คอมเม้นต์": "คำว่า 'คอมเม้นต์' สะกดผิดตามราชบัณฑิตยสภา ที่ถูกต้องคือ 'คอมเมนต์'",
+    "เฟสบุ๊ค": "คำว่า 'เฟสบุ๊ค' สะกดผิดตามราชบัณฑิตยสภา ที่ถูกต้องคือ 'เฟซบุ๊ก'",
+    "ติ๊กต๊อก": "คำว่า 'ติ๊กต๊อก' สะกดผิดตามราชบัณฑิตยสภา ที่ถูกต้องคือ 'ติ๊กต็อก'",
+    "กูเกิ้ล": "คำว่า 'กูเกิ้ล' สะกดผิดตามราชบัณฑิตยสภา ที่ถูกต้องคือ 'กูเกิล'",
+    "ไมโครซอฟท์": "คำว่า 'ไมโครซอฟท์' สะกดผิดตามราชบัณฑิตยสภา ที่ถูกต้องคือ 'ไมโครซอฟต์'",
+    "ช็อปปิ้ง": "คำว่า 'ช็อปปิ้ง' สะกดผิดตามราชบัณฑิตยสภา ที่ถูกต้องคือ 'ช้อปปิง'",
+    "แชท": "คำว่า 'แชท' สะกดผิด ที่ถูกต้องคือ 'แชต' (ใช้ ต เต่า)",
+    "ล็อกอิน": "คำว่า 'ล็อกอิน' สะกดผิด ที่ถูกต้องคือ 'ล็อกอิน'",
+    "ล็อคอิน": "คำว่า 'ล็อคอิน' สะกดผิด ที่ถูกต้องคือ 'ล็อกอิน'",
+    "เซิฟเวอร์": "คำว่า 'เซิฟเวอร์' สะกดผิด ที่ถูกต้องคือ 'เซิร์ฟเวอร์'",
+    # ศัพท์กฎหมาย นิติบัญญัติ และงานสารบรรณ
+    "กฏหมาย": "คำว่า 'กฏหมาย' สะกดผิดด้วย ฏ ปฏัก ที่ถูกต้องคือ 'กฎหมาย' (ใช้ ฎ ชฎา)",
+    "กฏกระทรวง": "คำว่า 'กฏกระทรวง' สะกดผิด ที่ถูกต้องคือ 'กฎกระทรวง' (ใช้ ฎ ชฎา)",
+    "กฏข้อบังคับ": "คำว่า 'กฏข้อบังคับ' สะกดผิด ที่ถูกต้องคือ 'กฎข้อบังคับ' (ใช้ ฎ ชฎา)",
+    "กฏเกณฑ์": "คำว่า 'กฏเกณฑ์' สะกดผิด ที่ถูกต้องคือ 'กฎเกณฑ์' (ใช้ ฎ ชฎา)",
+    "กฏระเบียบ": "คำว่า 'กฏระเบียบ' สะกดผิด ที่ถูกต้องคือ 'กฎระเบียบ' (ใช้ ฎ ชฎา)",
+    "ปรากฎ": "คำว่า 'ปรากฎ' สะกดผิดด้วย ฎ ชฎา ที่ถูกต้องคือ 'ปรากฏ' (ใช้ ฏ ปฏัก)",
+    "ปรากฎการณ์": "คำว่า 'ปรากฎการณ์' สะกดผิด ที่ถูกต้องคือ 'ปรากฏการณ์' (ใช้ ฏ ปฏัก)",
+    "มงกุฏ": "คำว่า 'มงกุฏ' สะกดผิด ที่ถูกต้องคือ 'มงกุฎ' (ใช้ ฎ ชฎา)",
+    "ปฎิบัติ": "คำว่า 'ปฎิบัติ' สะกดผิดด้วย ฎ ชฎา ที่ถูกต้องคือ 'ปฏิบัติ' (ใช้ ฏ ปฏัก)",
+    "ปฎิบัติการ": "คำว่า 'ปฎิบัติการ' สะกดผิด ที่ถูกต้องคือ 'ปฏิบัติการ' (ใช้ ฏ ปฏัก)",
+    "ปฎิบัติงาน": "คำว่า 'ปฎิบัติงาน' สะกดผิด ที่ถูกต้องคือ 'ปฏิบัติงาน' (ใช้ ฏ ปฏัก)",
+    "ปฎิบัติหน้าที่": "คำว่า 'ปฎิบัติหน้าที่' สะกดผิด ที่ถูกต้องคือ 'ปฏิบัติหน้าที่' (ใช้ ฏ ปฏัก)",
+    "ปฎิรูป": "คำว่า 'ปฎิรูป' สะกดผิดด้วย ฎ ชฎา ที่ถูกต้องคือ 'ปฏิรูป' (ใช้ ฏ ปฏัก)",
+    "แปลญัตติ": "ในกระบวนการนิติบัญญัติของรัฐสภา ต้องใช้คำว่า 'แปรญัตติ' (ห้ามใช้ 'แปล')",
+    "การแปลญัตติ": "ในกระบวนการนิติบัญญัติของรัฐสภา ต้องใช้คำว่า 'การแปรญัตติ'",
+    "คำขอแปลญัตติ": "ในกระบวนการนิติบัญญัติของรัฐสภา ต้องใช้คำว่า 'คำขอแปรญัตติ'",
+    "สังเกตุ": "คำว่า 'สังเกตุ' ใส่สระอุเกินมา ที่ถูกต้องตามพจนานุกรมคือ 'สังเกต' (ไม่มีสระอุ)",
+    "ข้อสังเกตุ": "คำว่า 'ข้อสังเกตุ' ใส่สระอุเกินมา ที่ถูกต้องคือ 'ข้อสังเกต'",
+    "สังเกตุการณ์": "คำว่า 'สังเกตุการณ์' ใส่สระอุเกินมา ที่ถูกต้องคือ 'สังเกตการณ์'",
+    "โอกาศ": "คำว่า 'โอกาศ' สะกดผิดด้วย ศ ศาลา ที่ถูกต้องคือ 'โอกาส' (ใช้ ส เสือ)",
+    "อากาส": "คำว่า 'อากาส' สะกดผิดด้วย ส เสือ ที่ถูกต้องคือ 'อากาศ' (ใช้ ศ ศาลา)",
+    "รสชาด": "คำว่า 'รสชาด' สะกดผิดด้วย ด เด็ก ที่ถูกต้องคือ 'รสชาติ' (ใช้ ติ)",
+    "ศรีษะ": "คำว่า 'ศรีษะ' สระผิดตำแหน่ง ที่ถูกต้องคือ 'ศีรษะ' (สระอี บน ศ ศาลา)",
+    "ลายเซ็นต์": "คำว่า 'ลายเซ็นต์' ใส่ทัณฑฆาตเกินมา ที่ถูกต้องคือ 'ลายเซ็น'",
+    "ผาสุข": "คำว่า 'ผาสุข' สะกดผิดด้วย ข ไข่ ที่ถูกต้องคือ 'ผาสุก' (ใช้ ก ไก่)",
+    "บริสุทธิ": "คำว่า 'บริสุทธิ' ตกทัณฑฆาต ที่ถูกต้องคือ 'บริสุทธิ์'",
+    "ยุทธสาสตร์": "คำว่า 'ยุทธสาสตร์' สะกดผิด ที่ถูกต้องคือ 'ยุทธศาสตร์'",
+    "อภิบาย": "คำว่า 'อภิบาย' สะกดผิด ที่ถูกต้องคือ 'อภิปราย'",
+    "พิจารนา": "คำว่า 'พิจารนา' สะกดผิดด้วย น หนู ที่ถูกต้องคือ 'พิจารณา' (ใช้ ณ เณร)",
+    "งบประมาน": "คำว่า 'งบประมาน' สะกดผิดด้วย น หนู ที่ถูกต้องคือ 'งบประมาณ' (ใช้ ณ เณร)",
+    "นวัฒกรรม": "คำว่า 'นวัฒกรรม' สะกดผิดด้วย ฒ ผู้เฒ่า ที่ถูกต้องคือ 'นวัตกรรม' (ใช้ ต เต่า)",
+    "วัฒนธรรม์": "คำว่า 'วัฒนธรรม์' มี ทัณฑฆาตเกินมา ที่ถูกต้องคือ 'วัฒนธรรม'",
+    "มติที่ประขุม": "คำว่า 'มติที่ประขุม' พิมพ์ผิด ข ไข่ ที่ถูกต้องคือ 'มติที่ประชุม'",
+    "ข้อบังคัง": "คำว่า 'ข้อบังคัง' พิมพ์ผิด ง งู ที่ถูกต้องคือ 'ข้อบังคับ'",
+    "รัฐธรรมนูน": "คำว่า 'รัฐธรรมนูน' สะกดผิดด้วย น หนู ที่ถูกต้องคือ 'รัฐธรรมนูญ' (ใช้ ญ หญิง)",
+    "ข้าราชการณ": "คำว่า 'ข้าราชการณ' มี ณ เกินมา ที่ถูกต้องคือ 'ข้าราชการ'",
+    "ประทานวุฒิสภา": "คำว่า 'ประทานวุฒิสภา' สะกดผิดด้วย ท ทหาร ที่ถูกต้องคือ 'ประธานวุฒิสภา' (ใช้ ธ ธง)",
+    "รองประทาน": "คำว่า 'รองประทาน' สะกดผิดด้วย ท ทหาร ที่ถูกต้องคือ 'รองประธาน' (ใช้ ธ ธง)",
+    "ราชกิจจานุเบกษาา": "คำว่า 'ราชกิจจานุเบกษาา' พิมพ์เกิน า ท้าย ที่ถูกต้องคือ 'ราชกิจจานุเบกษา'",
+    "สัมฤทธิ์ผล": "คำว่า 'สัมฤทธิ์ผล' ใส่ทัณฑฆาตที่ ธิ เกินมา ที่ถูกต้องคือ 'สัมฤทธิผล'",
+    "เอกฉันทร์": "คำว่า 'เอกฉันทร์' สะกดผิด ที่ถูกต้องคือ 'เอกฉันท์' (ใช้ นท์)",
+    "องประชุม": "คำว่า 'องประชุม' พิมพ์ตก ค์ ที่ถูกต้องคือ 'องค์ประชุม'",
+    "กรรมาธิการณ": "คำว่า 'กรรมาธิการณ' มี ณ เกินมา ที่ถูกต้องคือ 'กรรมาธิการ'",
+    "กฤษฏีกา": "คำว่า 'กฤษฏีกา' สะกดผิดด้วย ฏ ปฏัก ที่ถูกต้องคือ 'กฤษฎีกา' (ใช้ ฎ ชฎา)",
+    "ผัดวันประกันพรุ่ง": "คำว่า 'ผัดวันประกันพรุ่ง' สะกดผิด ที่ถูกต้องตามพจนานุกรมคือ 'ผลัดวันประกันพรุ่ง'",
+    "ลำใย": "คำว่า 'ลำใย' ใช้สระใอม้วนผิด ที่ถูกต้องคือ 'ลำไย' (สระไอไม้มลาย)",
+    "กระเพรา": "คำว่า 'กระเพรา' มี ร ควบเกินมา ที่ถูกต้องตามพจนานุกรมราชบัณฑิตยสภาคือ 'กะเพรา'",
 }
 
 
@@ -293,9 +459,6 @@ def check_misspellings_dictionary(paragraphs: list) -> list:
     sorted_wrongs = sorted(misspelling_map.keys(), key=len, reverse=True)
 
     for p in paragraphs:
-        if p.get("is_header"):
-            continue
-
         text = p["text"]
         para_idx = p["index"] + 1
         page_code = p["page_code"]
@@ -457,9 +620,6 @@ def check_mandatory_first_parenthesis(paragraphs: list) -> list:
         expected_bracket = f"({en_word})"
 
         for p in paragraphs:
-            if p.get("is_header"):
-                continue
-
             text = p["text"]
             para_idx = p["index"] + 1
             page_code = p["page_code"]
@@ -551,9 +711,6 @@ def check_vocabulary_and_transliteration(
     )
 
     for p in paragraphs:
-        if p.get("is_header"):
-            continue
-
         text = p["text"]
         para_idx = p["index"] + 1
         page_code = p["page_code"]
@@ -674,8 +831,6 @@ def check_parliament_rules(paragraphs: list) -> list:
     ]
 
     for p in paragraphs:
-        if p.get("is_header"):
-            continue
         text = p["text"]
         para_idx = p["index"] + 1
 
@@ -838,9 +993,6 @@ def check_senator_names_and_formatting(paragraphs: list) -> list:
     )
 
     for p in paragraphs:
-        if p.get("is_header"):
-            continue
-
         text = p["text"]
         para_idx = p["index"] + 1
         page_code = p["page_code"]
@@ -915,9 +1067,6 @@ def check_senate_editorial_rules(paragraphs: list) -> list:
     label = RULES_CONFIG["senate_formatting"]["label"]
 
     for p in paragraphs:
-        if p.get("is_header"):
-            continue
-
         text = p["text"]
         para_idx = p["index"] + 1
         page_code = p["page_code"]
@@ -1151,11 +1300,16 @@ def run_full_check(
     if progress_bar:
         progress_bar.progress(1.0, text="✅ ตรวจสอบครบถ้วน 100% ทุกย่อหน้า!")
 
-    # ขจัดรายการซ้ำซ้อน (Deduplicate: ป้องกันปัญหาคำเดิมแจ้งเตือนซ้ำ)
+    # ขจัดรายการซ้ำซ้อน (Deduplicate: โดยไม่ตัดคำผิดที่เกิดซ้ำในบริบทคนละจุดของย่อหน้าเดียวกัน)
     unique_issues = []
     seen_keys = set()
     for iss in all_issues:
-        key = (iss["para_index"], iss["wrong_word"].strip(), iss["correct_word"].strip())
+        key = (
+            iss["para_index"],
+            iss["wrong_word"].strip(),
+            iss["correct_word"].strip(),
+            iss.get("snippet", "").strip()
+        )
         if key not in seen_keys:
             seen_keys.add(key)
             unique_issues.append(iss)
