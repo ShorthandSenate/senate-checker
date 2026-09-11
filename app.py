@@ -218,7 +218,7 @@ st.markdown("""
     <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
         <h1 style="margin: 0;">📋 ระบบตรวจรายงานการประชุมวุฒิสภา</h1>
         <span style="font-size: 0.82rem; background: rgba(255, 255, 255, 0.18); padding: 4px 12px; border-radius: 20px; font-weight: 500; letter-spacing: 0.3px;">
-            🕒 อัปเดตล่าสุด: 11 ก.ย. 2569 | 10:00 น.
+            🕒 อัปเดตล่าสุด: 11 ก.ย. 2569 | 10:18 น. (v2.1 Final)
         </span>
     </div>
 </div>
@@ -428,9 +428,14 @@ if st.session_state.check_results is not None:
         else:
             pages_str = "-"
             
-        report_md = f"**พบข้อผิดพลาดในหน้า:** {pages_str}\n\n"
-        report_md += "**รายงานการตรวจทานเอกสาร:**\n\n"
+        report_html = f"""
+        <div style="font-size: 1.05rem; line-height: 2; margin-bottom: 20px;">
+            <b>พบข้อผิดพลาดในหน้า:</b> {pages_str}<br><br>
+            <b>รายงานการตรวจทานเอกสาร:</b>
+        </div>
+        """
         
+        report_text = f"พบข้อผิดพลาดในหน้า: {pages_str}\n\nรายงานการตรวจทานเอกสาร:\n\n"
         for idx, issue in enumerate(filtered):
             wrong = issue["wrong_word"]
             correct = issue["correct_word"]
@@ -438,18 +443,25 @@ if st.session_state.check_results is not None:
             para = issue["para_index"]
             page_code = issue.get("page_code") or f"หน้า {issue.get('page_hint', 1)}"
             full_header = issue.get("full_header") or ""
-            
             pos_str = f"{full_header}" if full_header else f"{page_code}"
             
-            report_md += f"o  **หน้า / ตำแหน่ง:** {pos_str} (ย่อหน้าที่ {para})\n"
-            report_md += f"o  **จุดที่ผิด:** ❌ 🔴 {wrong}\n"
-            report_md += f"o  **แก้ไขเป็น:** ✅ 🟢 {correct}\n"
-            report_md += f"o  **เหตุผล/คำแนะนำ:** {reason}\n\n"
+            report_html += f"""
+            <div style="margin-bottom: 22px; line-height: 2.1; font-size: 1.02rem; padding: 12px 16px; background: #ffffff; border: 1px solid #e2e8f0; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.04);">
+                <div>&bull; &nbsp;&nbsp; <b>หน้า / ตำแหน่ง:</b> {pos_str} (ย่อหน้าที่ {para})</div>
+                <div>&bull; &nbsp;&nbsp; <b>จุดที่ผิด:</b> ❌ 🔴 <span style="color:#c53030; font-weight:700;">{wrong}</span></div>
+                <div>&bull; &nbsp;&nbsp; <b>แก้ไขเป็น:</b> ✅ 🟢 <span style="color:#22543d; font-weight:700;">{correct}</span></div>
+                <div style="color: #4a5568;">&bull; &nbsp;&nbsp; <b>เหตุผล/คำแนะนำ:</b> {reason}</div>
+            </div>
+            """
             
-        st.markdown(report_md)
-        
+            report_text += f"o  หน้า / ตำแหน่ง: {pos_str} (ย่อหน้าที่ {para})\n"
+            report_text += f"o  จุดที่ผิด: ❌ 🔴 {wrong}\n"
+            report_text += f"o  แก้ไขเป็น: ✅ 🟢 {correct}\n"
+            report_text += f"o  เหตุผล/คำแนะนำ: {reason}\n\n"
+            
+        st.markdown(report_html, unsafe_allow_html=True)
         st.markdown("---")
-        st.text_area("📋 **คัดลอกรายงานทั้งหมดที่นี่ (Ctrl+A แล้ว Ctrl+C):**", value=report_md, height=400)
+        st.text_area("📋 **คัดลอกรายงานผลการตรวจทั้งหมดที่นี่ (Ctrl+A แล้ว Ctrl+C):**", value=report_text, height=350)
 
 
 # ============================================================
