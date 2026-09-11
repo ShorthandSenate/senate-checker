@@ -296,7 +296,7 @@ st.markdown("""
     <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
         <h1 style="margin: 0;">📋 ระบบตรวจรายงานการประชุมวุฒิสภา</h1>
         <span style="font-size: 0.82rem; background: rgba(255, 255, 255, 0.18); padding: 4px 12px; border-radius: 20px; font-weight: 500; letter-spacing: 0.3px;">
-            🕒 อัปเดตล่าสุด: 11 ก.ย. 2569 | 14:15 น. (v2.5 Professional)
+            🕒 อัปเดตล่าสุด: 11 ก.ย. 2569 | 15:30 น. (v2.6 Enterprise)
         </span>
     </div>
 </div>
@@ -536,8 +536,8 @@ if st.session_state.check_results is not None:
             full_header = issue.get("full_header") or ""
             pos_str = f"{full_header}" if full_header else f"{page_code}"
             
-            # ดึงประโยคบริบทและไฮไลต์คำผิดด้วยสีเหลืองสไตล์ Word (ไม่มีเครื่องหมายก้ามปู [[]])
-            hl_tag = f'<mark style="background-color: #ffff00; color: #000000; padding: 1px 5px; border-radius: 2px; font-weight: bold;">{wrong}</mark>'
+            # ดึงประโยคบริบทและไฮไลต์คำผิดด้วยสีเหลือง + ขีดเส้นใต้หยักสีแดง (ไม่มีเครื่องหมายก้ามปู [[]])
+            hl_tag = f'<mark style="background-color: #ffff00; color: #000000; padding: 1px 5px; border-radius: 2px; font-weight: bold; text-decoration: underline wavy red;">{wrong}</mark>'
             snippet = (issue.get("snippet") or "").strip()
             if wrong and wrong in snippet:
                 highlighted_snippet = snippet.replace(wrong, hl_tag, 1)
@@ -546,11 +546,11 @@ if st.session_state.check_results is not None:
             else:
                 highlighted_snippet = hl_tag
             
-            lines.append(f"o  **หน้า / ตำแหน่ง:** {pos_str}  ")
-            lines.append(f"o  **ข้อความในเอกสาร:** ...{highlighted_snippet}...  ")
-            lines.append(f"o  **จุดที่ผิด:** ❌ 🔴 <span style=\"color: #b91c1c; font-weight: bold;\">{wrong}</span>  ")
-            lines.append(f"o  **แก้ไขเป็น:** ✅ 🟢 <span style=\"color: #15803d; font-weight: bold;\">{correct}</span>  ")
-            lines.append(f"o  **เหตุผล/คำแนะนำ:** {reason}\n")
+            lines.append(f"•  **หน้า / ตำแหน่ง:** {pos_str}  ")
+            lines.append(f"•  **ข้อความในเอกสาร:** ...{highlighted_snippet}...  ")
+            lines.append(f"•  **จุดที่ผิด:** ❌ 🔴 <span style=\"color: #b91c1c; font-weight: bold; text-decoration: underline wavy red;\">{wrong}</span>  ")
+            lines.append(f"•  **แก้ไขเป็น:** ✅ 🟢 <span style=\"color: #15803d; font-weight: bold;\">{correct}</span>  ")
+            lines.append(f"•  **เหตุผล/คำแนะนำ:** {reason}\n")
 
         report_text = "\n".join(lines)
 

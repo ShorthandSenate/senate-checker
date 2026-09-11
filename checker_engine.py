@@ -436,99 +436,49 @@ def _get_misspelling_reason(wrong: str, correct: str) -> str:
     )
 
 
+_dict_checker_instance = None
+
+
+def get_dictionary_checker():
+    global _dict_checker_instance
+    if _dict_checker_instance is None:
+        from rule_checker import DictionaryChecker, THAI_TRANSLIT_WRONG_MAP, EXTRA_TYPO_MAP
+        dc = DictionaryChecker()
+        # 1. โหลด COMMON_MISPELLING_MAP จาก database_manager
+        if dm.COMMON_MISPELLING_MAP:
+            dc.load_dict(
+                {k: (v, _get_misspelling_reason(k, v)) for k, v in dm.COMMON_MISPELLING_MAP.items()},
+                rule_type="misspelling",
+                overwrite=False
+            )
+        # 2. โหลด THAI_TRANSLIT_WRONG_MAP (คู่มือกิจวุฒิ — priority สูงสุด)
+        dc.load_dict(
+            THAI_TRANSLIT_WRONG_MAP,
+            rule_type="transliteration",
+            overwrite=True
+        )
+        # 3. โหลด EXTRA_TYPO_MAP (คำพิมพ์ตกหล่น เช่น พิจรณา)
+        dc.load_dict(
+            EXTRA_TYPO_MAP,
+            rule_type="misspelling",
+            overwrite=False
+        )
+        _dict_checker_instance = dc
+    return _dict_checker_instance
+
+
 def check_misspellings_dictionary(paragraphs: list) -> list:
     """
     ตรวจหาคำผิดภาษาไทย-อังกฤษจากฐานข้อมูล (Word-style Lookup):
-    - ใช้ COMMON_MISPELLING_MAP ใน database_manager.py
-    - ตรวจแบบ Exact Substring Match สำหรับภาษาไทย
-    - ตรวจแบบ Word Boundary สำหรับภาษาอังกฤษ
+    - ใช้ DictionaryChecker (Trie Substring Match) โดยไม่พึ่งพา Standard Tokenizer
+    - รองรับคำทับศัพท์ทางการวุฒิสภา (1,561 คำ) และคำสะกดผิด/ตกหล่น 100% Deterministic
     - แสดงเหตุผลประกอบทุกรายการ เพื่อให้ผู้ตรวจตัดสินใจ
     """
     if not RULES_CONFIG.get("misspelling", {}).get("enabled", True):
         return []
 
-    misspelling_map = dm.COMMON_MISPELLING_MAP
-    if not misspelling_map:
-        return []
-
-    color = RULES_CONFIG["misspelling"]["color"]
-    label = RULES_CONFIG["misspelling"]["label"]
-    issues = []
-
-    # เรียงคำค้นหาจากยาวไปสั้น (Longest Match First) ป้องกันคำย่อยซ้อน
-    sorted_wrongs = sorted(misspelling_map.keys(), key=len, reverse=True)
-
-    for p in paragraphs:
-        text = p["text"]
-        para_idx = p["index"] + 1
-        page_code = p["page_code"]
-        full_header = p["full_header"]
-        covered_spans = []
-
-        for wrong in sorted_wrongs:
-            correct = misspelling_map[wrong]
-
-            # ข้ามถ้าคำ "ผิด" เท่ากับคำ "ถูก" (anchor entries)
-            if wrong == correct:
-                continue
-
-            is_english = bool(re.match(r'^[A-Za-z0-9\s\-]+$', wrong))
-
-            if is_english:
-                pattern = rf'\b{re.escape(wrong)}\b'
-                for m in re.finditer(pattern, text, re.IGNORECASE):
-                    start, end = m.start(), m.end()
-                    if any(cs <= start and end <= ce for cs, ce in covered_spans):
-                        continue
-                    covered_spans.append((start, end))
-                    matched = m.group()
-                    reason = _get_misspelling_reason(wrong, correct)
-                    issues.append({
-                        "rule": "misspelling",
-                        "rule_label": label,
-                        "para_index": para_idx,
-                        "page_hint": page_code,
-                        "page_code": page_code,
-                        "full_header": full_header,
-                        "wrong_word": matched,
-                        "correct_word": correct,
-                        "reason": reason,
-                        "snippet": build_context_snippet(text, matched),
-                        "color": color,
-                    })
-            else:
-                # ภาษาไทย: Exact Substring Match
-                start_pos = 0
-                while True:
-                    idx_found = text.find(wrong, start_pos)
-                    if idx_found == -1:
-                        break
-                    start, end = idx_found, idx_found + len(wrong)
-                    start_pos = end
-
-                    # ป้องกันเด็ดขาด: ถ้าคำถูกยาวกว่าและข้อความตำแหน่งนี้คือคำที่ถูกต้องอยู่แล้ว ให้ข้ามทันที
-                    if len(correct) > len(wrong) and text[start:start + len(correct)] == correct:
-                        continue
-
-                    if any(cs <= start and end <= ce for cs, ce in covered_spans):
-                        continue
-                    covered_spans.append((start, end))
-                    reason = _get_misspelling_reason(wrong, correct)
-                    issues.append({
-                        "rule": "misspelling",
-                        "rule_label": label,
-                        "para_index": para_idx,
-                        "page_hint": page_code,
-                        "page_code": page_code,
-                        "full_header": full_header,
-                        "wrong_word": wrong,
-                        "correct_word": correct,
-                        "reason": reason,
-                        "snippet": build_context_snippet(text, wrong),
-                        "color": color,
-                    })
-
-    return issues
+    dc = get_dictionary_checker()
+    return dc.check_paragraphs(paragraphs)
 
 
 # ============================================================
@@ -850,6 +800,26 @@ def check_parliament_rules(paragraphs: list) -> list:
                     "color": color,
                 })
 
+        # กฎมติวิปและคู่มือคำทับศัพท์ทางการวุฒิสภา: ตรวจคำย่อ เอ.ไอ. / เอ.ไอ
+        for m in re.finditer(r'เอ\.ไอ\.?', text):
+            wrong_ai = m.group()
+            issues.append({
+                "rule": "parliament_rules",
+                "rule_label": label,
+                "para_index": para_idx,
+                "page_hint": p["page_code"],
+                "page_code": p["page_code"],
+                "full_header": p["full_header"],
+                "wrong_word": wrong_ai,
+                "correct_word": "เอไอ",
+                "reason": (
+                    "ตามมติวิปและคู่มือคำทับศัพท์ทางการวุฒิสภา ให้เขียนทับศัพท์ว่า "
+                    "'เอไอ' (ไม่มีจุด) หรือใช้ 'ปัญญาประดิษฐ์' เมื่อกล่าวถึงครั้งแรก"
+                ),
+                "snippet": build_context_snippet(text, wrong_ai),
+                "color": color,
+            })
+
     return issues
 
 
@@ -1129,29 +1099,67 @@ def check_senate_editorial_rules(paragraphs: list) -> list:
             })
 
         # ไม้ยมก (ๆ) ต้องเว้นวรรคหน้าและหลัง
-        for m in re.finditer(r"([^\s\d\(\[\{]+)ๆ|ๆ([^\s\)\],\.])", text):
-            start, end = m.start(), m.end()
-            if any(cs <= start and end <= ce for cs, ce in covered_spans):
+        # R1: ขาดวรรคหน้า
+        for m in re.finditer(r'(?<=[^\s\(\[\{])ๆ', text):
+            idx = m.start()
+            start = idx
+            for i in range(idx - 1, max(idx - 8, -1), -1):
+                if text[i] in ' \t\n\r([{\'\".,;:!?':
+                    start = i + 1
+                    break
+                start = i
+            pre_word = text[start:idx]
+            if not pre_word:
                 continue
+            wrong_m = pre_word + "ๆ"
+            correct_m = pre_word + " ๆ"
+            if any(cs <= start and idx + 1 <= ce for cs, ce in covered_spans):
+                continue
+            covered_spans.append((start, idx + 1))
+            issues.append({
+                "rule": "senate_formatting",
+                "rule_label": label,
+                "para_index": para_idx,
+                "page_hint": page_code,
+                "page_code": page_code,
+                "full_header": full_header,
+                "wrong_word": wrong_m,
+                "correct_word": correct_m,
+                "reason": "เครื่องหมายไม้ยมก (ๆ) ต้องเว้นวรรคข้างหน้า ๑ เคาะ ตามระเบียบงานสารบรรณ/สำนักกรรมาธิการ ๓",
+                "snippet": build_context_snippet(text, wrong_m),
+                "color": color,
+            })
 
-            match_str = m.group()
-            correct_str = re.sub(r"([^\s]+)ๆ", r"\1 ๆ", match_str)
-            correct_str = re.sub(r"ๆ([^\s]+)", r"ๆ \1", correct_str)
-            if correct_str != match_str:
-                covered_spans.append((start, end))
-                issues.append({
-                    "rule": "senate_formatting",
-                    "rule_label": label,
-                    "para_index": para_idx,
-                    "page_hint": page_code,
-                    "page_code": page_code,
-                    "full_header": full_header,
-                    "wrong_word": match_str,
-                    "correct_word": correct_str,
-                    "reason": "เครื่องหมายไม้ยมก (ๆ) ต้องเว้นวรรคทั้งข้างหน้าและข้างหลัง ตามระเบียบสำนักกรรมาธิการ ๓",
-                    "snippet": build_context_snippet(text, match_str),
-                    "color": color,
-                })
+        # R2: ขาดวรรคหลัง
+        for m in re.finditer(r'ๆ(?=[^\s\)\]\},\.\;\:\?\!\n\r\u0e46])', text):
+            idx = m.start()
+            end = idx + 1
+            for i in range(idx + 1, min(idx + 8, len(text))):
+                if text[i] in ' \t\n\r([{\'\".,;:!?':
+                    end = i
+                    break
+                end = i + 1
+            post_word = text[idx + 1:end]
+            if not post_word:
+                continue
+            wrong_m = "ๆ" + post_word
+            correct_m = "ๆ " + post_word
+            if any(cs <= idx and end <= ce for cs, ce in covered_spans):
+                continue
+            covered_spans.append((idx, end))
+            issues.append({
+                "rule": "senate_formatting",
+                "rule_label": label,
+                "para_index": para_idx,
+                "page_hint": page_code,
+                "page_code": page_code,
+                "full_header": full_header,
+                "wrong_word": wrong_m,
+                "correct_word": correct_m,
+                "reason": "เครื่องหมายไม้ยมก (ๆ) ต้องเว้นวรรคข้างหลัง ๑ เคาะ ตามระเบียบงานสารบรรณ/สำนักกรรมาธิการ ๓",
+                "snippet": build_context_snippet(text, wrong_m),
+                "color": color,
+            })
 
         # ผู้รับรองถูกต้อง
         for m in re.finditer(r"ผู้รับรองถูก\b(?!ต้อง)", text):
@@ -1300,7 +1308,7 @@ def run_full_check(
     if progress_bar:
         progress_bar.progress(1.0, text="✅ ตรวจสอบครบถ้วน 100% ทุกย่อหน้า!")
 
-    # ขจัดรายการซ้ำซ้อน (Deduplicate: โดยไม่ตัดคำผิดที่เกิดซ้ำในบริบทคนละจุดของย่อหน้าเดียวกัน)
+    # ขจัดรายการซ้ำซ้อน (Deduplicate: รวมรายการที่ตรวจพบคำผิดและคำถูกเดียวกันในย่อหน้าเดียวกัน)
     unique_issues = []
     seen_keys = set()
     for iss in all_issues:
@@ -1308,7 +1316,6 @@ def run_full_check(
             iss["para_index"],
             iss["wrong_word"].strip(),
             iss["correct_word"].strip(),
-            iss.get("snippet", "").strip()
         )
         if key not in seen_keys:
             seen_keys.add(key)
