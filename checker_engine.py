@@ -265,21 +265,19 @@ def read_docx_paragraphs(file_bytes: bytes) -> list:
 # ============================================================
 
 def build_context_snippet(text: str, wrong_word: str, word_count: int = CONTEXT_WORDS) -> str:
-    """ดึงข้อความรอบข้างคำผิด word_count คำทั้งสองข้าง (ไม่มีเครื่องหมายก้ามปู [])"""
+    """ดึงข้อความรอบข้างคำผิดให้เห็นรูปประโยคได้ยาวและชัดเจน ป้องกันการหลุดบริบท (ไม่มีเครื่องหมายก้ามปู [])"""
     idx = text.find(wrong_word)
     if idx == -1:
-        return (text[:120] + "...") if len(text) > 120 else text
-    left_words = text[:idx].split()
-    right_words = text[idx + len(wrong_word):].split()
-    left_snippet = " ".join(left_words[-word_count:])
-    right_snippet = " ".join(right_words[:word_count])
-    parts = []
-    if left_snippet:
-        parts.append(left_snippet)
-    parts.append(wrong_word)
-    if right_snippet:
-        parts.append(right_snippet)
-    return " ".join(parts).strip()
+        return (text[:180] + "...") if len(text) > 180 else text
+
+    # ดึงขอบเขตข้อความกว้างขึ้น (ประมาณ 70-80 ตัวอักษร) เพื่อให้เห็นประโยคได้ยาวครบถ้วน ป้องกันหลุดบริบท
+    chars_window = max(75, word_count * 2)
+    start_pos = max(0, idx - chars_window)
+    end_pos = min(len(text), idx + len(wrong_word) + chars_window)
+
+    prefix = ("..." if start_pos > 0 else "") + text[start_pos:idx]
+    suffix = text[idx + len(wrong_word):end_pos] + ("..." if end_pos < len(text) else "")
+    return (prefix + wrong_word + suffix).strip()
 
 
 # ============================================================
@@ -666,16 +664,48 @@ def check_vocabulary_and_transliteration(
         reverse=True
     )
 
+    # คำนวณช่วงข้อความที่อยู่ในวงเล็บ (...) ของทุกย่อหน้า
+    # รองรับเครื่องหมายพิเศษ (โคลอน :, ขีด -, จุด ., แอมเพอร์แซนด์ &)
+    # และรองรับกรณีวงเล็บเปิดข้ามบรรทัด/ข้ามย่อหน้า เช่น (Kiken\nYoshi Training)
+    all_paren_spans = []
+    prev_unclosed = False
+
     for p in paragraphs:
+        t_str = p.get("text", "")
+        spans = []
+        n = len(t_str)
+        in_p = prev_unclosed
+        start_idx = 0 if in_p else -1
+
+        for i, ch in enumerate(t_str):
+            if ch in '([{（':
+                if not in_p:
+                    in_p = True
+                    start_idx = i
+            elif ch in ')]}）':
+                if in_p:
+                    spans.append((start_idx, i + 1))
+                    in_p = False
+                    start_idx = -1
+                else:
+                    # วงเล็บปิดที่ไม่มีวงเล็บเปิดในย่อหน้านี้ (ปิดวงเล็บที่เปิดมาจากย่อหน้าก่อนหน้า)
+                    spans.append((0, i + 1))
+
+        if in_p and start_idx != -1:
+            spans.append((start_idx, n))
+            prev_unclosed = True
+        else:
+            prev_unclosed = False
+
+        all_paren_spans.append(spans)
+
+    for p_idx, p in enumerate(paragraphs):
         text = p["text"]
         para_idx = p["index"] + 1
         page_code = p["page_code"]
         full_header = p["full_header"]
         covered_spans = []
-
-        paren_spans = []
-        for m in re.finditer(r'\([A-Za-z0-9\s\-_/]+\)', text):
-            paren_spans.append((m.start(), m.end()))
+        paren_spans = all_paren_spans[p_idx]
 
         for wrong_key, info in sorted_lookup_items:
             if wrong_key == info.get("correct"):

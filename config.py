@@ -5,8 +5,8 @@
 # --- ขนาดไฟล์สูงสุด ---
 MAX_FILE_SIZE_MB = 100
 
-# --- จำนวนคำ context snippet สองข้าง ---
-CONTEXT_WORDS = 12
+# --- จำนวนคำ context snippet สองข้าง (ปรับให้เห็นรูปประโยคยาวชัดเจน ป้องกันหลุดบริบท) ---
+CONTEXT_WORDS = 35
 
 # --- Google Sheets Cache (ยังคงไว้สำหรับฐานข้อมูลเสริมถ้าต้องการในอนาคต) ---
 SHEETS_CACHE_TTL = 300  # วินาที (5 นาที)

@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DATA_DIR = os.path.join(BASE_DIR, "data")
 
-CONTEXT_WINDOW = 12
+CONTEXT_WINDOW = 65
 
 
 # ─────────────────────────────────────────────────────────────
@@ -485,9 +485,11 @@ class SenateDocumentChecker:
 # ─────────────────────────────────────────────────────────────
 
 def _build_snippet(text: str, start: int, end: int, window: int = CONTEXT_WINDOW) -> str:
-    left = text[max(0, start - window):start].lstrip()
+    start_pos = max(0, start - window)
+    end_pos = min(len(text), end + window)
+    left = ("..." if start_pos > 0 else "") + text[start_pos:start].lstrip()
     wrong = text[start:end]
-    right = text[end:end + window].rstrip()
+    right = text[end:end_pos].rstrip() + ("..." if end_pos < len(text) else "")
     return left + wrong + right
 
 

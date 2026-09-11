@@ -296,7 +296,7 @@ st.markdown("""
     <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
         <h1 style="margin: 0;">📋 ระบบตรวจรายงานการประชุมวุฒิสภา</h1>
         <span style="font-size: 0.82rem; background: rgba(255, 255, 255, 0.18); padding: 4px 12px; border-radius: 20px; font-weight: 500; letter-spacing: 0.3px;">
-            🕒 อัปเดตล่าสุด: 11 ก.ย. 2569 | 15:55 น. (v2.7 Ultra)
+            🕒 อัปเดตล่าสุด: 11 ก.ย. 2569 | 16:12 น. (v2.8 Supreme)
         </span>
     </div>
 </div>
