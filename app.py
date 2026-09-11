@@ -11,12 +11,64 @@ import os
 import html
 import difflib
 import unicodedata
+import math
+import struct
+import base64
+import io
 import pandas as pd
 import streamlit as st
 
 from checker_engine import run_full_check
 import config
 from config import RULES_CONFIG, MAX_FILE_SIZE_MB
+
+
+@st.cache_resource
+def get_soft_chime_b64() -> str:
+    """สร้างไฟล์เสียง WAV สังเคราะห์ 2 โน้ต (D5 -> A5) นุ่มนวล ละมุน สบายหู สำหรับแจ้งเตือนเมื่อตรวจเสร็จ"""
+    sample_rate = 44100
+    duration = 1.1
+    num_samples = int(sample_rate * duration)
+    buf = io.BytesIO()
+
+    # RIFF / WAV Header
+    num_channels = 1
+    bits_per_sample = 16
+    byte_rate = sample_rate * num_channels * (bits_per_sample // 8)
+    block_align = num_channels * (bits_per_sample // 8)
+    data_size = num_samples * block_align
+
+    buf.write(b'RIFF')
+    buf.write(struct.pack('<I', 36 + data_size))
+    buf.write(b'WAVEfmt ')
+    buf.write(struct.pack('<I', 16))
+    buf.write(struct.pack('<H', 1))
+    buf.write(struct.pack('<H', num_channels))
+    buf.write(struct.pack('<I', sample_rate))
+    buf.write(struct.pack('<I', byte_rate))
+    buf.write(struct.pack('<H', block_align))
+    buf.write(struct.pack('<H', bits_per_sample))
+    buf.write(b'data')
+    buf.write(struct.pack('<I', data_size))
+
+    for i in range(num_samples):
+        t = i / sample_rate
+        val = 0.0
+        # Note 1: 587.33 Hz (D5) - soft decay
+        if t >= 0:
+            env1 = math.exp(-5.5 * t)
+            val += 0.22 * math.sin(2.0 * math.pi * 587.33 * t) * env1
+            val += 0.06 * math.sin(2.0 * math.pi * 1174.66 * t) * env1
+        # Note 2: 880.0 Hz (A5) - starts at 0.18s
+        if t >= 0.18:
+            t2 = t - 0.18
+            env2 = math.exp(-4.5 * t2)
+            val += 0.26 * math.sin(2.0 * math.pi * 880.0 * t2) * env2
+            val += 0.08 * math.sin(2.0 * math.pi * 1760.0 * t2) * env2
+        val = max(-1.0, min(1.0, val))
+        buf.write(struct.pack('<h', int(val * 32767)))
+
+    return base64.b64encode(buf.getvalue()).decode('ascii')
 
 
 def is_combining_mark(ch: str) -> bool:
@@ -205,6 +257,32 @@ button span,
     word-break: break-word;
 }
 
+/* ขยายพื้นที่ Drag and Drop Zone ของ File Uploader ให้ใหญ่เต็มพื้นที่ */
+[data-testid="stFileUploadDropzone"] {
+    min-height: 250px !important;
+    border: 2.5px dashed #3949ab !important;
+    background-color: #f8faff !important;
+    border-radius: 14px !important;
+    display: flex !important;
+    flex-direction: column !important;
+    justify-content: center !important;
+    align-items: center !important;
+    padding: 2.5rem 1.5rem !important;
+    margin-top: 0.5rem !important;
+    margin-bottom: 1.5rem !important;
+    cursor: pointer !important;
+    transition: all 0.25s ease-in-out !important;
+}
+[data-testid="stFileUploadDropzone"]:hover {
+    border-color: #1a237e !important;
+    background-color: #eef2ff !important;
+    box-shadow: 0 4px 16px rgba(57, 73, 171, 0.12) !important;
+}
+[data-testid="stFileUploadDropzone"] button {
+    margin-top: 10px !important;
+    padding: 0.5rem 1.5rem !important;
+}
+
 /* Hide footer */
 footer { visibility: hidden; }
 </style>
@@ -218,7 +296,7 @@ st.markdown("""
     <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
         <h1 style="margin: 0;">📋 ระบบตรวจรายงานการประชุมวุฒิสภา</h1>
         <span style="font-size: 0.82rem; background: rgba(255, 255, 255, 0.18); padding: 4px 12px; border-radius: 20px; font-weight: 500; letter-spacing: 0.3px;">
-            🕒 อัปเดตล่าสุด: 11 ก.ย. 2569 | 11:02 น. (v2.3 Stable)
+            🕒 อัปเดตล่าสุด: 11 ก.ย. 2569 | 11:32 น. (v2.4 Ultimate)
         </span>
     </div>
 </div>
@@ -287,6 +365,24 @@ if uploaded_file:
                 f"✅ ตรวจครบ {len(paragraphs)} ย่อหน้า 100% | "
                 f"พบปัญหา {len(issues)} รายการ | "
                 f"ใช้เวลา {elapsed:.1f} วินาที"
+            )
+
+            # เล่นเสียงแจ้งเตือนแบบละมุน ไม่ดังมาก แต่ได้ยินชัดเจน
+            chime_b64 = get_soft_chime_b64()
+            st.markdown(
+                f"""
+                <audio autoplay style="display:none;">
+                    <source src="data:audio/wav;base64,{chime_b64}" type="audio/wav">
+                </audio>
+                <script>
+                try {{
+                    var snd = new Audio("data:audio/wav;base64,{chime_b64}");
+                    snd.volume = 0.35;
+                    snd.play();
+                }} catch(e) {{}}
+                </script>
+                """,
+                unsafe_allow_html=True
             )
         except Exception as err:
             progress_bar.empty()
@@ -436,12 +532,21 @@ if st.session_state.check_results is not None:
             wrong = issue["wrong_word"]
             correct = issue["correct_word"]
             reason = issue["reason"]
-            para = issue["para_index"]
             page_code = issue.get("page_code") or f"หน้า {issue.get('page_hint', 1)}"
             full_header = issue.get("full_header") or ""
             pos_str = f"{full_header}" if full_header else f"{page_code}"
             
-            lines.append(f"o  **หน้า / ตำแหน่ง:** {pos_str} (ย่อหน้าที่ {para})  ")
+            # ดึงประโยคบริบทและไฮไลต์คำผิดให้ชัดเจนเพื่อค้นหาใน Word ได้ทันที
+            snippet = (issue.get("snippet") or "").strip()
+            if wrong and wrong in snippet:
+                highlighted_snippet = snippet.replace(wrong, f"**[{wrong}]**")
+            elif snippet:
+                highlighted_snippet = snippet
+            else:
+                highlighted_snippet = f"**[{wrong}]**"
+            
+            lines.append(f"o  **หน้า / ตำแหน่ง:** {pos_str}  ")
+            lines.append(f"o  **ข้อความในเอกสาร:** ...{highlighted_snippet}...  ")
             lines.append(f"o  **จุดที่ผิด:** ❌ 🔴 {wrong}  ")
             lines.append(f"o  **แก้ไขเป็น:** ✅ 🟢 {correct}  ")
             lines.append(f"o  **เหตุผล/คำแนะนำ:** {reason}\n")
@@ -453,12 +558,7 @@ if st.session_state.check_results is not None:
 
 
 # ============================================================
-# Empty State
+# Empty State (Drag and Drop Zone ขนาดใหญ่จัดการเรียบร้อยแล้ว)
 # ============================================================
 elif not uploaded_file:
-    st.markdown("""
-    <div style="text-align:center;padding:3rem 1rem;color:#aaa">
-        <div style="font-size:5rem">📄</div>
-        <h3 style="color:#bbb;font-weight:400">อัปโหลดไฟล์ .docx เพื่อเริ่มตรวจสอบ</h3>
-    </div>
-    """, unsafe_allow_html=True)
+    pass

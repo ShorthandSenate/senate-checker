@@ -19,19 +19,6 @@ from config import (
 
 logger = logging.getLogger(__name__)
 
-# ฐานข้อมูลตรวจสอบคำสะกดภาษาอังกฤษ (High-quality English SpellChecker)
-_en_spell = None
-try:
-    from spellchecker import SpellChecker
-    _en_spell = SpellChecker()
-    _en_spell.word_frequency.load_words([
-        'powerpoint', 'softpower', 'shopee', 'youtube', 'facebook',
-        'tiktok', 'instagram', 'twitter', 'platform', 'online',
-        'database', 'website', 'digital', 'update', 'link', 'click',
-        'email', 'project', 'function', 'graphic', 'sensor', 'internet'
-    ])
-except Exception:
-    pass
 
 
 # ============================================================
@@ -424,27 +411,6 @@ def check_parenthesis_repeat(paragraphs: list) -> list:
                     "para_index": para_idx,
                     "page_code": page_code,
                 }
-                # ตรวจสอบการสะกดคำภาษาอังกฤษในวงเล็บด้วย SpellChecker (ถ้าติดตั้งไว้)
-                if _en_spell:
-                    en_words = re.findall(r'[A-Za-z]{4,}', inner_text)
-                    for w in en_words:
-                        if w.lower() in _en_spell.unknown([w.lower()]):
-                            corr = _en_spell.correction(w.lower())
-                            if corr and corr.lower() != w.lower():
-                                corr_display = corr.capitalize() if w[0].isupper() else corr
-                                issues.append({
-                                    "rule": "parenthesis_repeat",
-                                    "rule_label": "คำภาษาอังกฤษสะกดผิด",
-                                    "para_index": para_idx,
-                                    "page_hint": page_code,
-                                    "page_code": page_code,
-                                    "full_header": full_header,
-                                    "wrong_word": w,
-                                    "correct_word": corr_display,
-                                    "reason": f"คำภาษาอังกฤษในวงเล็บ \"{bracket_form}\" สะกดผิด จาก \"{w}\" ที่ถูกต้องคือ \"{corr_display}\"",
-                                    "snippet": build_context_snippet(text, bracket_form),
-                                    "color": RULES_CONFIG["parenthesis_repeat"]["color"],
-                                })
             else:
                 first = seen[exact_key]
                 issues.append({
@@ -455,10 +421,10 @@ def check_parenthesis_repeat(paragraphs: list) -> list:
                     "page_code": page_code,
                     "full_header": full_header,
                     "wrong_word": bracket_form,
-                    "correct_word": f"ตัดวงเล็บออก (กล่าวถึงครั้งแรกแล้วที่ย่อหน้า {first['para_index']} [{first['page_code']}])",
+                    "correct_word": f"ตัดวงเล็บออก (กล่าวถึงครั้งแรกแล้วที่ {first['page_code']})",
                     "reason": (
-                        f"คำภาษาอังกฤษในวงเล็บ \"{bracket_form}\" ปรากฏเป็นครั้งแรกแล้วที่ย่อหน้า {first['para_index']} "
-                        f"({first['page_code']}) การกล่าวถึงตั้งแต่ครั้งที่ ๒ เป็นต้นไป ให้ตัดวงเล็บออกตามระเบียบสำนักกรรมาธิการ ๓"
+                        f"คำภาษาอังกฤษในวงเล็บ \"{bracket_form}\" ปรากฏเป็นครั้งแรกแล้วที่ {first['page_code']} "
+                        f"การกล่าวถึงตั้งแต่ครั้งที่ ๒ เป็นต้นไป ให้ตัดวงเล็บออกตามระเบียบวุฒิสภา"
                     ),
                     "snippet": build_context_snippet(text, bracket_form),
                     "color": RULES_CONFIG["parenthesis_repeat"]["color"],
@@ -615,11 +581,26 @@ def check_vocabulary_and_transliteration(
                     in_paren = any(p_start <= start and end <= p_end for p_start, p_end in paren_spans)
                     if in_paren:
                         continue
+
+                    # ข้ามถ้ามีคำทับศัพท์ไทยกำกับอยู่ด้านหน้าแล้ว (เช่น ยูทูบ YouTube หรือ ยูทูบ (YouTube))
+                    prefix_text = text[:start].rstrip()
+                    if prefix_text.endswith(info["correct"]) or prefix_text.endswith(f"{info['correct']} ("):
+                        continue
+
                     is_covered = any(c_start <= start and end <= c_end for c_start, c_end in covered_spans)
                     if is_covered:
                         continue
                     covered_spans.append((start, end))
                     matched_str = m.group()
+
+                    # ตามระเบียบวุฒิสภา: เมื่อกล่าวถึงคำภาษาอังกฤษ ให้ใช้คำทับศัพท์ไทยพร้อมวงเล็บภาษาอังกฤษกำกับ
+                    suggested_correct = f"{info['correct']} ({matched_str})"
+                    suggested_reason = (
+                        f"คำภาษาอังกฤษ \"{matched_str}\" ปรากฏเดี่ยวในเอกสาร "
+                        f"ตามระเบียบวุฒิสภาหากเป็นการกล่าวถึงครั้งแรก ควรใช้คำทับศัพท์ภาษาไทยกำกับด้วยภาษาอังกฤษในวงเล็บ "
+                        f"เป็น \"{suggested_correct}\""
+                    )
+
                     issues.append({
                         "rule": rule_type,
                         "rule_label": RULES_CONFIG[rule_type]["label"],
@@ -628,8 +609,8 @@ def check_vocabulary_and_transliteration(
                         "page_code": page_code,
                         "full_header": full_header,
                         "wrong_word": matched_str,
-                        "correct_word": info["correct"],
-                        "reason": info["note"],
+                        "correct_word": suggested_correct,
+                        "reason": suggested_reason,
                         "snippet": build_context_snippet(text, matched_str),
                         "color": RULES_CONFIG[rule_type]["color"],
                     })
