@@ -1,7 +1,8 @@
 # ============================================================
 # app.py - Streamlit Web Application หลัก
 # ตรวจคำผิดและจัดระเบียบรูปแบบรายงานการประชุมวุฒิสภา
-# รองรับ Multi-user | 200+ หน้า | 4 กฎการตรวจสอบ
+# 100% Deterministic Rule & Database Engine — ไม่ใช้ AI
+# รองรับ Multi-user | 200+ หน้า | 7 กฎการตรวจสอบ
 # ============================================================
 
 import time
@@ -15,7 +16,8 @@ import streamlit as st
 
 from checker_engine import run_full_check
 import config
-from config import RULES_CONFIG, MAX_FILE_SIZE_MB, GEMINI_MODELS
+from config import RULES_CONFIG, MAX_FILE_SIZE_MB
+
 
 def is_combining_mark(ch: str) -> bool:
     return unicodedata.category(ch) in ('Mn', 'Mc')
@@ -78,23 +80,9 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="collapsed",
     menu_items={
-        "About": "ระบบตรวจคำผิดรายงานการประชุมวุฒิสภา v1.0\nพัฒนาด้วย Streamlit + Gemini AI",
+        "About": "ระบบตรวจคำผิดรายงานการประชุมวุฒิสภา v2.0\nพัฒนาด้วย Streamlit + Rule & Database Engine (100% Deterministic)\nไม่ใช้ AI — ผลลัพธ์แม่นยำ รวดเร็ว ไม่เกิด Hallucination",
     },
 )
-
-# --- โหลด Default Values จาก Streamlit Cloud Secrets หรือ Environment Variables ---
-# ลำดับ Priority: Streamlit Secrets > OS Environment > ค่าว่าง
-def _get_secret(key: str) -> str:
-    try:
-        val = st.secrets.get(key, "")
-        if val:
-            return val
-    except Exception:
-        pass
-    return os.environ.get(key, "")
-
-_DEFAULT_API_KEY    = _get_secret("GEMINI_API_KEY")
-_DEFAULT_SHEETS_URL = _get_secret("GOOGLE_SHEETS_URL")
 
 # ============================================================
 # Custom CSS
@@ -221,11 +209,8 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 # ============================================================
-# Config (load API keys silently, no sidebar)
+# Config (ไม่ต้องใช้ AI API Key อีกต่อไป — 100% Rule & Database Engine)
 # ============================================================
-api_key = _DEFAULT_API_KEY or getattr(config, "DEFAULT_API_KEY", "")
-sheets_url = _DEFAULT_SHEETS_URL or getattr(config, "DEFAULT_SHEETS_URL", "")
-rule_overrides: dict = {}
 
 # ============================================================
 # File Upload
@@ -281,8 +266,6 @@ if uploaded_file:
         try:
             paragraphs, issues = run_full_check(
                 file_bytes=file_bytes,
-                api_key=api_key,
-                sheets_url=sheets_url,
                 progress_bar=progress_bar,
                 status_text=status_text,
             )
@@ -523,6 +506,6 @@ elif not uploaded_file:
         <div style="font-size:5rem">📄</div>
         <h3 style="color:#bbb;font-weight:400">อัปโหลดไฟล์ .docx เพื่อเริ่มตรวจสอบ</h3>
         <p>รองรับรายงานการประชุมวุฒิสภา ขนาดสูงสุด 100 MB (200+ หน้า)<br>
-        ตรวจ 4 กฎ: คำผิดทั่วไป | ศัพท์บัญญัติ | วงเล็บซ้ำ | คำทับศัพท์</p>
+        ระบบตรวจสอบ 100% Deterministic: คำผิด | วงเล็บซ้ำ | บังคับวงเล็บครั้งแรก | คำทับศัพท์ | ระเบียบวุฒิสภา | ชื่อ สว. (วรรค ๒ เคาะ) | ระเบียบสำนักกรรมาธิการ ๓</p>
     </div>
     """, unsafe_allow_html=True)
