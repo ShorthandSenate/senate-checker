@@ -3,3 +3,5 @@ python-docx>=1.1.0
 pandas>=2.2.0
 openpyxl>=3.1.0
 lxml>=4.9.0
+pythainlp>=5.3.0
+pyspellchecker>=0.8.0

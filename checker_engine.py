@@ -19,6 +19,20 @@ from config import (
 
 logger = logging.getLogger(__name__)
 
+# ฐานข้อมูลตรวจสอบคำสะกดภาษาอังกฤษ (High-quality English SpellChecker)
+_en_spell = None
+try:
+    from spellchecker import SpellChecker
+    _en_spell = SpellChecker()
+    _en_spell.word_frequency.load_words([
+        'powerpoint', 'softpower', 'shopee', 'youtube', 'facebook',
+        'tiktok', 'instagram', 'twitter', 'platform', 'online',
+        'database', 'website', 'digital', 'update', 'link', 'click',
+        'email', 'project', 'function', 'graphic', 'sensor', 'internet'
+    ])
+except Exception:
+    pass
+
 
 # ============================================================
 # 1. อ่านไฟล์ Word และแยกย่อหน้า
@@ -215,6 +229,14 @@ MISSPELLING_REASON_MAP = {
     "แลละ": "คำว่า 'แลละ' สะกดผิด ที่ถูกต้องคือ 'และ'",
     "กระทรวงสาธรณสุข": "คำว่า 'กระทรวงสาธรณสุข' พิมพ์ตก า ที่ถูกต้องคือ 'กระทรวงสาธารณสุข'",
     "ช็อปปี": "คำว่า 'ช็อปปี' สะกดผิด ที่ถูกต้องคือ 'ช้อปปี' ตามมติราชบัณฑิตยสภา",
+    "ผูกพันธ์": "คำว่า 'ผูกพันธ์' สะกดผิด ที่ถูกต้องคือ 'ผูกพัน' (ไม่มี ธ์ ท้าย) ตามพจนานุกรมราชบัณฑิตยสภา",
+    "เซ็นต์ชื่อ": "คำว่า 'เซ็นต์ชื่อ' สะกดผิด ที่ถูกต้องคือ 'เซ็นชื่อ' (เซ็น ไม่มี ต์) ตามพจนานุกรมราชบัณฑิตยสภา",
+    "เซ็นต์": "คำว่า 'เซ็นต์' สะกดผิด ที่ถูกต้องคือ 'เซ็น' (ไม่มี ต์) ตามพจนานุกรมราชบัณฑิตยสภา",
+    "อานิสงฆ์": "คำว่า 'อานิสงฆ์' สะกดผิด ที่ถูกต้องคือ 'อานิสงส์' (ใช้ ส์ ไม่ใช่ ฆ์) ตามพจนานุกรมราชบัณฑิตยสภา",
+    "โลกาภิวัฒน์": "คำว่า 'โลกาภิวัฒน์' สะกดผิด ที่ถูกต้องคือ 'โลกาภิวัตน์' (ใช้ ต ไม่ใช่ ฒ) ตามพจนานุกรมราชบัณฑิตยสภา",
+    "กิติมศักดิ์": "คำว่า 'กิติมศักดิ์' พิมพ์ตก ต ที่ถูกต้องคือ 'กิตติมศักดิ์' ตามพจนานุกรมราชบัณฑิตยสภา",
+    "วิพากวิจารณ์": "คำว่า 'วิพากวิจารณ์' พิมพ์ตก ษ์ ที่ถูกต้องคือ 'วิพากษ์วิจารณ์' ตามพจนานุกรมราชบัณฑิตยสภา",
+    "เกมส์": "คำว่า 'เกมส์' สะกดผิดตามราชบัณฑิตยสภา ที่ถูกต้องคือ 'เกม' (ไม่มี ส์)",
     # คำทับศัพท์ทั่วไป
     "สมาร์ท": "คำว่า 'สมาร์ท' สะกดผิดตามหลักราชบัณฑิตยสภา ที่ถูกต้องคือ 'สมาร์ต' (ไม่มีทัณฑฆาต)",
     "แอพ": "คำว่า 'แอพ' สะกดผิด ที่ถูกต้องคือ 'แอป'",
@@ -402,6 +424,27 @@ def check_parenthesis_repeat(paragraphs: list) -> list:
                     "para_index": para_idx,
                     "page_code": page_code,
                 }
+                # ตรวจสอบการสะกดคำภาษาอังกฤษในวงเล็บด้วย SpellChecker (ถ้าติดตั้งไว้)
+                if _en_spell:
+                    en_words = re.findall(r'[A-Za-z]{4,}', inner_text)
+                    for w in en_words:
+                        if w.lower() in _en_spell.unknown([w.lower()]):
+                            corr = _en_spell.correction(w.lower())
+                            if corr and corr.lower() != w.lower():
+                                corr_display = corr.capitalize() if w[0].isupper() else corr
+                                issues.append({
+                                    "rule": "parenthesis_repeat",
+                                    "rule_label": "คำภาษาอังกฤษสะกดผิด",
+                                    "para_index": para_idx,
+                                    "page_hint": page_code,
+                                    "page_code": page_code,
+                                    "full_header": full_header,
+                                    "wrong_word": w,
+                                    "correct_word": corr_display,
+                                    "reason": f"คำภาษาอังกฤษในวงเล็บ \"{bracket_form}\" สะกดผิด จาก \"{w}\" ที่ถูกต้องคือ \"{corr_display}\"",
+                                    "snippet": build_context_snippet(text, bracket_form),
+                                    "color": RULES_CONFIG["parenthesis_repeat"]["color"],
+                                })
             else:
                 first = seen[exact_key]
                 issues.append({
@@ -899,12 +942,19 @@ def check_senate_editorial_rules(paragraphs: list) -> list:
         page_code = p["page_code"]
         full_header = p["full_header"]
 
+        covered_spans = []
+
         for rule in rules:
             pattern = rule["wrong_pattern"]
             replacement = rule["correct_replacement"]
             reason = rule["reason"]
 
             for m in re.finditer(pattern, text):
+                start, end = m.start(), m.end()
+                if any(cs <= start and end <= ce for cs, ce in covered_spans):
+                    continue
+                covered_spans.append((start, end))
+
                 wrong_str = m.group()
                 try:
                     correct_str = re.sub(pattern, replacement, wrong_str)
@@ -927,6 +977,11 @@ def check_senate_editorial_rules(paragraphs: list) -> list:
 
         # คำสันธาน ระหว่าง...กับ...
         for m in re.finditer(r"(ระหว่าง\s*[^\s,และ]{2,20}\s+)และ(\s+[^\s,และ]{2,20})", text):
+            start, end = m.start(), m.end()
+            if any(cs <= start and end <= ce for cs, ce in covered_spans):
+                continue
+            covered_spans.append((start, end))
+
             full_match = m.group()
             correct_match = f"{m.group(1)}กับ{m.group(2)}"
             issues.append({
@@ -945,10 +1000,15 @@ def check_senate_editorial_rules(paragraphs: list) -> list:
 
         # ไม้ยมก (ๆ) ต้องเว้นวรรคหน้าและหลัง
         for m in re.finditer(r"([^\s\d\(\[\{]+)ๆ|ๆ([^\s\)\],\.])", text):
+            start, end = m.start(), m.end()
+            if any(cs <= start and end <= ce for cs, ce in covered_spans):
+                continue
+
             match_str = m.group()
             correct_str = re.sub(r"([^\s]+)ๆ", r"\1 ๆ", match_str)
             correct_str = re.sub(r"ๆ([^\s]+)", r"ๆ \1", correct_str)
             if correct_str != match_str:
+                covered_spans.append((start, end))
                 issues.append({
                     "rule": "senate_formatting",
                     "rule_label": label,
