@@ -218,7 +218,7 @@ st.markdown("""
     <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
         <h1 style="margin: 0;">📋 ระบบตรวจรายงานการประชุมวุฒิสภา</h1>
         <span style="font-size: 0.82rem; background: rgba(255, 255, 255, 0.18); padding: 4px 12px; border-radius: 20px; font-weight: 500; letter-spacing: 0.3px;">
-            🕒 อัปเดตล่าสุด: 11 ก.ย. 2569 | 10:55 น. (v2.2 Stable)
+            🕒 อัปเดตล่าสุด: 11 ก.ย. 2569 | 11:02 น. (v2.3 Stable)
         </span>
     </div>
 </div>
@@ -450,10 +450,6 @@ if st.session_state.check_results is not None:
 
         with st.container(height=650):
             st.markdown(report_text)
-
-        st.markdown("---")
-        raw_copy_text = report_text.replace("**", "").replace("  \n", "\n")
-        st.text_area("📋 **คัดลอกรายงานผลการตรวจทั้งหมด (Ctrl+A แล้ว Ctrl+C):**", value=raw_copy_text, height=220)
 
 
 # ============================================================
