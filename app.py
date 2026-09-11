@@ -91,8 +91,8 @@ st.markdown("""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Sarabun:wght@400;600;700&display=swap');
 
-html, body, [class*="css"] {
-    font-family: 'Sarabun', sans-serif;
+html, body, [class*="css"], .stMarkdown, .stText, h1, h2, h3, h4, p, span, div {
+    font-family: 'Sarabun', 'Leelawadee UI', 'Tahoma', 'Thonburi', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
 }
 
 /* Header */
