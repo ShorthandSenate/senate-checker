@@ -18,11 +18,63 @@ import io
 import pandas as pd
 import streamlit as st
 
+import importlib
 from checker_engine import run_full_check
 import config
 from config import RULES_CONFIG, MAX_FILE_SIZE_MB
 import database_manager as dm
-from senate_names_checker import reload_senate_names_checker
+
+# ป้องกันปัญหา Streamlit Cloud Hot-reload ค้างโมดูลเวอร์ชันเก่าใน memory
+if not hasattr(dm, "get_senate_personnel"):
+    try:
+        dm = importlib.reload(dm)
+    except Exception:
+        pass
+
+try:
+    import senate_names_checker
+    reload_senate_names_checker = getattr(senate_names_checker, "reload_senate_names_checker", lambda: None)
+except Exception:
+    reload_senate_names_checker = lambda: None
+
+
+def safe_get_senate_personnel(active_only: bool = False) -> list:
+    """ดึงรายชื่อ สว. และผู้บริหารอย่างปลอดภัย 100% ป้องกัน AttributeError บน Cloud"""
+    global dm
+    if not hasattr(dm, "get_senate_personnel"):
+        try:
+            dm = importlib.reload(dm)
+        except Exception:
+            pass
+    if hasattr(dm, "get_senate_personnel"):
+        try:
+            return dm.get_senate_personnel(active_only=active_only)
+        except Exception:
+            pass
+    # Fallback อ่านไฟล์ JSON โดยตรงหากโมดูลใน memory ยังไม่อัปเดต
+    jpath = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "senate_personnel.json")
+    if os.path.exists(jpath):
+        try:
+            import json
+            with open(jpath, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if active_only:
+                return [p for p in data if p.get("is_active", 1) == 1]
+            return data
+        except Exception:
+            pass
+    return []
+
+
+def safe_add_or_update_senate_person(**kwargs) -> bool:
+    """บันทึกรายชื่อ สว. หรือผู้บริหารอย่างปลอดภัย"""
+    global dm
+    if hasattr(dm, "add_or_update_senate_person"):
+        try:
+            return dm.add_or_update_senate_person(**kwargs)
+        except Exception:
+            pass
+    return False
 
 
 @st.cache_resource
@@ -298,7 +350,7 @@ st.markdown("""
     <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
         <h1 style="margin: 0;">📋 ระบบตรวจรายงานการประชุมวุฒิสภา</h1>
         <span style="font-size: 0.82rem; background: rgba(255, 255, 255, 0.18); padding: 4px 12px; border-radius: 20px; font-weight: 500; letter-spacing: 0.3px;">
-            🕒 อัปเดตล่าสุด: 14 ก.ย. 2569 | 11:15 น. (v3.0 Master)
+            🕒 อัปเดตล่าสุด: 14 ก.ย. 2569 | 11:20 น. (v3.0 Master)
         </span>
     </div>
 </div>
@@ -309,7 +361,7 @@ st.markdown("""
 # ============================================================
 with st.sidebar:
     st.markdown("### 🏛️ ทำเนียบ สว. และผู้บริหาร")
-    personnel_list = dm.get_senate_personnel(active_only=False)
+    personnel_list = safe_get_senate_personnel(active_only=False)
     active_count = sum(1 for p in personnel_list if p.get("is_active", 1) == 1)
     senator_count = sum(1 for p in personnel_list if p.get("person_type") == "senator" and p.get("is_active", 1) == 1)
     exec_count = sum(1 for p in personnel_list if p.get("person_type") == "executive" and p.get("is_active", 1) == 1)
@@ -352,7 +404,7 @@ with st.sidebar:
             if not p_first or not p_last:
                 st.error("กรุณาระบุชื่อและนามสกุลให้ครบถ้วน")
             else:
-                ok = dm.add_or_update_senate_person(
+                ok = safe_add_or_update_senate_person(
                     person_type=p_type_val,
                     title=p_title,
                     first_name=p_first,
