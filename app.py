@@ -21,6 +21,8 @@ import streamlit as st
 from checker_engine import run_full_check
 import config
 from config import RULES_CONFIG, MAX_FILE_SIZE_MB
+import database_manager as dm
+from senate_names_checker import reload_senate_names_checker
 
 
 @st.cache_resource
@@ -296,15 +298,74 @@ st.markdown("""
     <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
         <h1 style="margin: 0;">📋 ระบบตรวจรายงานการประชุมวุฒิสภา</h1>
         <span style="font-size: 0.82rem; background: rgba(255, 255, 255, 0.18); padding: 4px 12px; border-radius: 20px; font-weight: 500; letter-spacing: 0.3px;">
-            🕒 อัปเดตล่าสุด: 11 ก.ย. 2569 | 16:12 น. (v2.8 Supreme)
+            🕒 อัปเดตล่าสุด: 14 ก.ย. 2569 | 11:15 น. (v3.0 Master)
         </span>
     </div>
 </div>
 """, unsafe_allow_html=True)
 
 # ============================================================
-# Config (ไม่ต้องใช้ AI API Key อีกต่อไป — 100% Rule & Database Engine)
+# Sidebar: ทำเนียบ สว. และผู้บริหาร (จัดการและอัปเดตรายชื่อได้ตลอดเวลา)
 # ============================================================
+with st.sidebar:
+    st.markdown("### 🏛️ ทำเนียบ สว. และผู้บริหาร")
+    personnel_list = dm.get_senate_personnel(active_only=False)
+    active_count = sum(1 for p in personnel_list if p.get("is_active", 1) == 1)
+    senator_count = sum(1 for p in personnel_list if p.get("person_type") == "senator" and p.get("is_active", 1) == 1)
+    exec_count = sum(1 for p in personnel_list if p.get("person_type") == "executive" and p.get("is_active", 1) == 1)
+
+    st.info(f"👥 กำลังปฏิบัติหน้าที่: **{active_count} ท่าน**\n\n• สมาชิกวุฒิสภา: **{senator_count} ท่าน**\n• ผู้บริหารสำนักงานฯ: **{exec_count} ท่าน**")
+
+    with st.expander("🔍 ค้นหารายชื่อในทำเนียบ", expanded=False):
+        search_q = st.text_input("ค้นหาชื่อ/สกุล", key="search_person_q")
+        matched = []
+        for p in personnel_list:
+            full = p.get("full_name_official", "")
+            if not search_q or search_q.strip() in full:
+                status_icon = "🟢" if p.get("is_active", 1) == 1 else "🔴 (พ้นตำแหน่ง)"
+                matched.append(f"{status_icon} **{full}** — *{p.get('role', '')}*")
+        if matched:
+            st.markdown("\n\n".join(matched[:15]))
+            if len(matched) > 15:
+                st.caption(f"... และอีก {len(matched) - 15} ท่าน")
+        else:
+            st.caption("ไม่พบรายชื่อที่ค้นหา")
+
+    with st.expander("➕ เพิ่ม / แก้ไขรายชื่อ (อัปเดตระบบ)", expanded=False):
+        st.caption("ใช้เมื่อมีการเปลี่ยนคำนำหน้า ชื่อ-นามสกุล หรือมีผู้เข้ารับตำแหน่งใหม่/ลาออก")
+        p_type = st.selectbox("ประเภทบุคลากร", ["สมาชิกวุฒิสภา", "ผู้บริหารสำนักงานฯ"], key="add_p_type")
+        p_type_val = "senator" if p_type == "สมาชิกวุฒิสภา" else "executive"
+
+        col_t1, col_t2 = st.columns([1, 2])
+        with col_t1:
+            p_title = st.text_input("คำนำหน้า/ยศ", placeholder="นาย / พลเอก", key="add_p_title")
+        with col_t2:
+            p_first = st.text_input("ชื่อตัว", placeholder="ชื่อ", key="add_p_first")
+
+        p_last = st.text_input("นามสกุล", placeholder="นามสกุล", key="add_p_last")
+        default_role = "สมาชิกวุฒิสภา" if p_type == "สมาชิกวุฒิสภา" else "รองเลขาธิการวุฒิสภา"
+        p_role = st.text_input("ตำแหน่งทางการ", value=default_role, key="add_p_role")
+        p_status = st.radio("สถานะการดำรงตำแหน่ง", ["ปฏิบัติหน้าที่ (Active)", "พ้นจากตำแหน่ง/ลาออก (Inactive)"], index=0, key="add_p_status")
+        is_active_val = 1 if "Active" in p_status else 0
+
+        if st.button("💾 บันทึกและอัปเดตระบบทันที", type="primary", use_container_width=True):
+            if not p_first or not p_last:
+                st.error("กรุณาระบุชื่อและนามสกุลให้ครบถ้วน")
+            else:
+                ok = dm.add_or_update_senate_person(
+                    person_type=p_type_val,
+                    title=p_title,
+                    first_name=p_first,
+                    last_name=p_last,
+                    role=p_role,
+                    is_active=is_active_val,
+                )
+                if ok:
+                    reload_senate_names_checker()
+                    st.success(f"✅ บันทึกข้อมูล '{p_title}{p_first}  {p_last}' เรียบร้อยแล้ว ระบบพร้อมใช้ตรวจทันที!")
+                    st.rerun()
+                else:
+                    st.error("เกิดข้อผิดพลาดในการบันทึกข้อมูล")
 
 # ============================================================
 # File Upload

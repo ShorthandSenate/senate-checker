@@ -875,172 +875,34 @@ MILITARY_POLICE_RANKS = {
 
 def check_senator_names_and_formatting(paragraphs: list) -> list:
     """
-    ตรวจสอบชื่อ-สกุล สมาชิกวุฒิสภา ๒๐๐ ท่าน และคำนำหน้านาม
+    ตรวจสอบความถูกต้องของชื่อ-สกุล สมาชิกวุฒิสภา ๒๐๐ ท่าน และผู้บริหารสำนักงานฯ ๑๕ ท่าน:
+    1. ตรวจจับคำสะกดผิด พิมพ์ตก สระเพี้ยน การันต์ผิด (Fuzzy Match >= 0.82)
+    2. ตรวจสอบการเว้นวรรคใหญ่ (๒ เคาะ) ระหว่างชื่อตัวและนามสกุล
+    3. ตรวจสอบการเว้นวรรคยศทหาร ตำรวจ วิชาการ ห่างกับชื่อตัว
+    4. ตรวจสอบความถูกต้องของคำนำหน้านาม
     """
     if not RULES_CONFIG.get("senator_names", {}).get("enabled", True):
         return []
 
-    senators = dm.get_senators_lookup()
-    if not senators:
+    try:
+        from senate_names_checker import get_senate_names_checker
+        names_checker = get_senate_names_checker()
+    except Exception as e:
+        logger.error(f"Failed to load senate_names_checker: {e}")
         return []
 
     issues = []
-    color = RULES_CONFIG["senator_names"]["color"]
-    label = RULES_CONFIG["senator_names"]["label"]
-
-    all_wrong_cases = []
-    for s in senators:
-        full = s["full_name_official"]
-        first = s["first_name"].strip()
-        last = s["last_name"].strip()
-        title = s["title"].strip()
-        middle = s["middle_name"].strip()
-        is_rank = title in MILITARY_POLICE_RANKS
-
-        if is_rank:
-            if middle:
-                all_wrong_cases.append({
-                    "wrong": f"{title}{first}  {middle}  {last}",
-                    "correct": full,
-                    "reason": f"คำนำหน้านามที่เป็นยศ \"{title}\" ต้องพิมพ์ห่างกับชื่อตัว ตามระเบียบสำนักกรรมาธิการ ๓",
-                })
-                all_wrong_cases.append({
-                    "wrong": f"{title}{first} {middle} {last}",
-                    "correct": full,
-                    "reason": f"คำนำหน้านามที่เป็นยศ \"{title}\" ต้องพิมพ์ห่างกับชื่อตัว และต้องเว้นวรรคใหญ่ (๒ เคาะ) ระหว่างชื่อ-สกุล",
-                })
-                all_wrong_cases.append({
-                    "wrong": f"{title}  {first} {middle} {last}",
-                    "correct": full,
-                    "reason": "ต้องเว้นวรรคใหญ่ (๒ เคาะ) ระหว่างชื่อตัว ชื่อกลาง และนามสกุล ตามระเบียบสำนักกรรมาธิการ ๓",
-                })
-                all_wrong_cases.append({
-                    "wrong": f"{title} {first} {middle} {last}",
-                    "correct": full,
-                    "reason": "ต้องเว้นวรรคใหญ่ (๒ เคาะ) ทั้งระหว่างยศ ชื่อตัว ชื่อกลาง และนามสกุล ตามระเบียบสำนักกรรมาธิการ ๓",
-                })
-            else:
-                all_wrong_cases.append({
-                    "wrong": f"{title}{first}  {last}",
-                    "correct": full,
-                    "reason": f"คำนำหน้านามที่เป็นยศ \"{title}\" ต้องพิมพ์ห่างกับชื่อตัว เช่น {title}  {first} ตามระเบียบสำนักกรรมาธิการ ๓",
-                })
-                all_wrong_cases.append({
-                    "wrong": f"{title}{first} {last}",
-                    "correct": full,
-                    "reason": f"คำนำหน้านามที่เป็นยศ \"{title}\" ต้องพิมพ์ห่างกับชื่อตัว และต้องเว้นวรรคใหญ่ (๒ เคาะ) ระหว่างชื่อตัวกับนามสกุล",
-                })
-                all_wrong_cases.append({
-                    "wrong": f"{title}  {first} {last}",
-                    "correct": full,
-                    "reason": "ต้องเว้นวรรคใหญ่ (๒ เคาะ) ระหว่างชื่อตัวและนามสกุล ตามระเบียบสำนักกรรมาธิการ ๓",
-                })
-                all_wrong_cases.append({
-                    "wrong": f"{title} {first} {last}",
-                    "correct": full,
-                    "reason": "ต้องเว้นวรรคใหญ่ (๒ เคาะ) ทั้งระหว่างยศและระหว่างชื่อตัวกับนามสกุล",
-                })
-
-            all_wrong_cases.append({
-                "wrong": f"{title}{first}",
-                "correct": f"{title}  {first}",
-                "reason": f"คำนำหน้านามที่เป็นยศ \"{title}\" ต้องพิมพ์ห่างกับชื่อตัว เช่น {title}  {first} ตามระเบียบสำนักกรรมาธิการ ๓",
-            })
-        else:
-            if middle:
-                all_wrong_cases.append({
-                    "wrong": f"{title}  {first}  {middle}  {last}",
-                    "correct": full,
-                    "reason": f"คำนำหน้านามทั่วไป \"{title}\" ให้พิมพ์ติดกับชื่อตัวโดยไม่ต้องเว้นวรรค ตามระเบียบสำนักกรรมาธิการ ๓",
-                })
-                all_wrong_cases.append({
-                    "wrong": f"{title} {first}  {middle}  {last}",
-                    "correct": full,
-                    "reason": f"คำนำหน้านามทั่วไป \"{title}\" ให้พิมพ์ติดกับชื่อตัว ตามระเบียบสำนักกรรมาธิการ ๓",
-                })
-                all_wrong_cases.append({
-                    "wrong": f"{title}{first} {middle} {last}",
-                    "correct": full,
-                    "reason": "ต้องเว้นวรรคใหญ่ (๒ เคาะ) ระหว่างชื่อตัว ชื่อกลาง และนามสกุล ตามระเบียบสำนักกรรมาธิการ ๓",
-                })
-            else:
-                all_wrong_cases.append({
-                    "wrong": f"{title}  {first}  {last}",
-                    "correct": full,
-                    "reason": f"คำนำหน้านามทั่วไป \"{title}\" ให้พิมพ์ติดกับชื่อตัว ตามระเบียบสำนักกรรมาธิการ ๓",
-                })
-                all_wrong_cases.append({
-                    "wrong": f"{title} {first}  {last}",
-                    "correct": full,
-                    "reason": f"คำนำหน้านามทั่วไป \"{title}\" ให้พิมพ์ติดกับชื่อตัว ตามระเบียบสำนักกรรมาธิการ ๓",
-                })
-                all_wrong_cases.append({
-                    "wrong": f"{title}{first} {last}",
-                    "correct": full,
-                    "reason": "ต้องเว้นวรรคใหญ่ (๒ เคาะ) ระหว่างชื่อตัวและนามสกุล ตามระเบียบสำนักกรรมาธิการ ๓",
-                })
-
-            all_wrong_cases.append({
-                "wrong": f"{title}  {first}",
-                "correct": f"{title}{first}",
-                "reason": f"คำนำหน้านามทั่วไป \"{title}\" ให้พิมพ์ติดกับชื่อตัวโดยไม่ต้องเว้นวรรค ตามระเบียบสำนักกรรมาธิการ ๓",
-            })
-            all_wrong_cases.append({
-                "wrong": f"{title} {first}",
-                "correct": f"{title}{first}",
-                "reason": f"คำนำหน้านามทั่วไป \"{title}\" ให้พิมพ์ติดกับชื่อตัวโดยไม่ต้องเว้นวรรค ตามระเบียบสำนักกรรมาธิการ ๓",
-            })
-
-    all_wrong_cases.sort(key=lambda x: len(x["wrong"]), reverse=True)
-
-    ranks_regex = (
-        r"\b(" + "|".join(sorted(MILITARY_POLICE_RANKS, key=len, reverse=True)) + r")"
-        r"([ก-๙]{2,})"
-    )
+    color = RULES_CONFIG.get("senator_names", {}).get("color", "#2E7D32")
+    label = RULES_CONFIG.get("senator_names", {}).get("label", "ชื่อ สว. / ผู้บริหาร")
 
     for p in paragraphs:
         text = p["text"]
         para_idx = p["index"] + 1
         page_code = p["page_code"]
         full_header = p["full_header"]
-        covered_spans = []
 
-        for item in all_wrong_cases:
-            w_str = item["wrong"]
-            if w_str in text and w_str != item["correct"]:
-                start_pos = 0
-                while True:
-                    idx_f = text.find(w_str, start_pos)
-                    if idx_f == -1:
-                        break
-                    start, end = idx_f, idx_f + len(w_str)
-                    start_pos = end
-                    if any(max(start, cs) < min(end, ce) for cs, ce in covered_spans):
-                        continue
-                    covered_spans.append((start, end))
-                    issues.append({
-                        "rule": "senator_names",
-                        "rule_label": label,
-                        "para_index": para_idx,
-                        "page_hint": page_code,
-                        "page_code": page_code,
-                        "full_header": full_header,
-                        "wrong_word": w_str,
-                        "correct_word": item["correct"],
-                        "reason": item["reason"],
-                        "snippet": build_context_snippet(text, w_str),
-                        "color": color,
-                    })
-
-        for m in re.finditer(ranks_regex, text):
-            start, end = m.start(), m.end()
-            if any(max(start, cs) < min(end, ce) for cs, ce in covered_spans):
-                continue
-            covered_spans.append((start, end))
-            matched_str = m.group()
-            rank_part = m.group(1)
-            name_part = m.group(2)
-            correct_str = f"{rank_part}  {name_part}"
+        found_issues = names_checker.check_text(text)
+        for fi in found_issues:
             issues.append({
                 "rule": "senator_names",
                 "rule_label": label,
@@ -1048,14 +910,15 @@ def check_senator_names_and_formatting(paragraphs: list) -> list:
                 "page_hint": page_code,
                 "page_code": page_code,
                 "full_header": full_header,
-                "wrong_word": matched_str,
-                "correct_word": correct_str,
-                "reason": f"คำนำหน้านามที่เป็นยศ \"{rank_part}\" ต้องพิมพ์ห่างกับชื่อตัว เช่น {rank_part}  {name_part} ตามระเบียบสำนักกรรมาธิการ ๓",
-                "snippet": build_context_snippet(text, matched_str),
+                "wrong_word": fi["wrong"],
+                "correct_word": fi["correct"],
+                "reason": fi["reason"],
+                "snippet": build_context_snippet(text, fi["wrong"]),
                 "color": color,
             })
 
     return issues
+
 
 
 # ============================================================

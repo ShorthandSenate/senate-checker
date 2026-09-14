@@ -795,3 +795,164 @@ SENATE_EDITORIAL_RULES = [
 def get_senate_editorial_rules() -> List[Dict]:
     """ส่งออกรายการกฎเฉพาะของสำนักกรรมาธิการ ๓"""
     return SENATE_EDITORIAL_RULES
+
+
+# ============================================================
+# 5. จัดการทำเนียบ สว. และผู้บริหาร (Senate Personnel 215 ท่าน)
+# ============================================================
+
+SENATE_PERSONNEL_JSON_PATH = os.path.join(DATA_DIR, "senate_personnel.json")
+
+
+def get_senate_personnel(active_only: bool = True) -> List[Dict]:
+    """ดึงรายชื่อ สว. และผู้บริหารทั้งหมด"""
+    conn = get_db_connection()
+    if conn:
+        try:
+            cur = conn.cursor()
+            query = "SELECT * FROM senate_personnel"
+            if active_only:
+                query += " WHERE is_active = 1"
+            query += " ORDER BY id ASC"
+            cur.execute(query)
+            rows = [dict(r) for r in cur.fetchall()]
+            conn.close()
+            return rows
+        except Exception as e:
+            logger.error(f"get_senate_personnel sqlite error: {e}")
+            if conn:
+                conn.close()
+
+    if os.path.exists(SENATE_PERSONNEL_JSON_PATH):
+        try:
+            with open(SENATE_PERSONNEL_JSON_PATH, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if active_only:
+                return [p for p in data if p.get("is_active", 1) == 1]
+            return data
+        except Exception as e:
+            logger.error(f"get_senate_personnel json error: {e}")
+
+    return []
+
+
+def get_senate_personnel_count() -> int:
+    """นับจำนวน สว. และผู้บริหารที่ยังปฏิบัติหน้าที่"""
+    personnel = get_senate_personnel(active_only=True)
+    return len(personnel)
+
+
+def add_or_update_senate_person(
+    person_type: str,
+    title: str,
+    first_name: str,
+    last_name: str,
+    role: str,
+    is_active: int = 1,
+    person_id: Optional[int] = None
+) -> bool:
+    """เพิ่มหรือแก้ไขข้อมูล สว. หรือผู้บริหาร"""
+    title = title.strip()
+    first_name = first_name.strip()
+    last_name = last_name.strip()
+    role = role.strip()
+    
+    # รูปแบบชื่อทางการ (เว้นวรรคใหญ่ ๒ เคาะ ระหว่างชื่อและนามสกุล)
+    if title:
+        # หากเป็นยศทหาร ตำรวจ วิชาการ ให้เว้น ๑ เคาะหลังยศ
+        if any(title.startswith(prefix) for prefix in ["พล", "พัน", "ร้อย", "นาวา", "ว่าที่", "ศาสตราจารย์", "รองศาสตราจารย์", "ผู้ช่วยศาสตราจารย์"]):
+            official = f"{title} {first_name}  {last_name}".strip()
+        else:
+            official = f"{title}{first_name}  {last_name}".strip()
+    else:
+        official = f"{first_name}  {last_name}".strip()
+
+    conn = get_db_connection()
+    if not conn:
+        return False
+
+    try:
+        cur = conn.cursor()
+        if person_id:
+            cur.execute("""
+                UPDATE senate_personnel
+                SET person_type = ?, title = ?, first_name = ?, last_name = ?,
+                    full_name_official = ?, role = ?, is_active = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+            """, (person_type, title, first_name, last_name, official, role, is_active, person_id))
+        else:
+            # ค้นหาว่ามีชื่อ-สกุลนี้อยู่แล้วหรือไม่
+            cur.execute("""
+                SELECT id FROM senate_personnel WHERE first_name = ? AND last_name = ?
+            """, (first_name, last_name))
+            row = cur.fetchone()
+            if row:
+                cur.execute("""
+                    UPDATE senate_personnel
+                    SET person_type = ?, title = ?, full_name_official = ?, role = ?, is_active = ?, updated_at = CURRENT_TIMESTAMP
+                    WHERE id = ?
+                """, (person_type, title, official, role, is_active, row["id"]))
+            else:
+                cur.execute("SELECT MAX(id) FROM senate_personnel")
+                max_id = (cur.fetchone()[0] or 0) + 1
+                cur.execute("""
+                    INSERT INTO senate_personnel (id, person_type, title, first_name, last_name, full_name_official, role, is_active)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """, (max_id, person_type, title, first_name, last_name, official, role, is_active))
+
+        conn.commit()
+        conn.close()
+
+        # ซิงก์ลง JSON ด้วยเพื่อให้ไฟล์ตรงกันเสมอ
+        export_senate_personnel_json()
+        return True
+    except Exception as e:
+        logger.error(f"add_or_update_senate_person error: {e}")
+        if conn:
+            conn.close()
+        return False
+
+
+def deactivate_senate_person(person_id: int) -> bool:
+    """ทำเครื่องหมายว่าพ้นจากตำแหน่ง / ลาออก"""
+    conn = get_db_connection()
+    if not conn:
+        return False
+    try:
+        cur = conn.cursor()
+        cur.execute("""
+            UPDATE senate_personnel
+            SET is_active = 0, updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+        """, (person_id,))
+        conn.commit()
+        conn.close()
+        export_senate_personnel_json()
+        return True
+    except Exception as e:
+        logger.error(f"deactivate_senate_person error: {e}")
+        if conn:
+            conn.close()
+        return False
+
+
+def export_senate_personnel_json() -> bool:
+    """ซิงก์ข้อมูลจาก SQLite ไปยัง senate_personnel.json"""
+    conn = get_db_connection()
+    if not conn:
+        return False
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT * FROM senate_personnel ORDER BY id ASC")
+        rows = [dict(r) for r in cur.fetchall()]
+        conn.close()
+
+        with open(SENATE_PERSONNEL_JSON_PATH, "w", encoding="utf-8") as f:
+            json.dump(rows, f, ensure_ascii=False, indent=2)
+        return True
+    except Exception as e:
+        logger.error(f"export_senate_personnel_json error: {e}")
+        if conn:
+            conn.close()
+        return False
+
