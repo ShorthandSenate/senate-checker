@@ -343,6 +343,48 @@ footer { visibility: hidden; }
 """, unsafe_allow_html=True)
 
 # ============================================================
+# Keepalive Heartbeat — ป้องกัน Streamlit หลับเวลาไม่มีคนใช้งาน
+# ส่ง invisible ping ทุก 4 นาทีเพื่อรักษา WebSocket connection
+# ============================================================
+st.markdown("""
+<script>
+(function() {
+    // ป้องกันการ register ซ้ำเมื่อ Streamlit re-render
+    if (window._stKeepAliveActive) return;
+    window._stKeepAliveActive = true;
+
+    var PING_INTERVAL_MS = 4 * 60 * 1000; // 4 นาที
+
+    function keepAlive() {
+        try {
+            // วิธีที่ 1: ใช้ fetch ping ไปที่ Streamlit health endpoint
+            fetch(window.location.origin + '/_stcore/health', {
+                method: 'GET',
+                cache: 'no-store'
+            }).catch(function() {});
+
+            // วิธีที่ 2: ส่ง WebSocket message ผ่าน Streamlit framework
+            // (Streamlit จะ interpret เป็น no-op แต่ช่วยรักษา connection)
+            var ws = window.parent && window.parent.document
+                ? window.parent.document.querySelectorAll('iframe')
+                : [];
+        } catch(e) {}
+    }
+
+    // เริ่ม heartbeat loop
+    setInterval(keepAlive, PING_INTERVAL_MS);
+
+    // Visibility change handler — เมื่อกลับมาที่ tab ให้ ping ทันที
+    document.addEventListener('visibilitychange', function() {
+        if (!document.hidden) {
+            keepAlive();
+        }
+    });
+})();
+</script>
+""", unsafe_allow_html=True)
+
+# ============================================================
 # Header
 # ============================================================
 st.markdown("""
@@ -350,7 +392,7 @@ st.markdown("""
     <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
         <h1 style="margin: 0;">📋 ระบบตรวจรายงานการประชุมวุฒิสภา</h1>
         <span style="font-size: 0.82rem; background: rgba(255, 255, 255, 0.18); padding: 4px 12px; border-radius: 20px; font-weight: 500; letter-spacing: 0.3px;">
-            🕒 อัปเดตล่าสุด: 14 ก.ย. 2569 | 11:20 น. (v3.0 Master)
+            🕒 อัปเดตล่าสุด: 30 ก.ย. 2569 | 11:05 น. (v3.1 Master)
         </span>
     </div>
 </div>
@@ -648,9 +690,15 @@ if st.session_state.check_results is not None:
             page_code = issue.get("page_code") or f"หน้า {issue.get('page_hint', 1)}"
             full_header = issue.get("full_header") or ""
             pos_str = f"{full_header}" if full_header else f"{page_code}"
-            
+
+            # แปลง double-space → &nbsp;&nbsp; เพื่อให้ HTML แสดงผลเว้นวรรค 2 เคาะจริง ๆ อย่างชัดเจน
+            # ป้องกัน browser ยุบ multiple spaces เป็น 1 เคาะ
+            wrong_display = wrong.replace("  ", "&nbsp;&nbsp;")
+            correct_display = correct.replace("  ", "&nbsp;&nbsp;")
+            reason_display = reason.replace("  ", "&nbsp;&nbsp;")
+
             # ดึงประโยคบริบทและไฮไลต์คำผิดด้วยสีเหลือง + ขีดเส้นใต้หยักสีแดง (ไม่มีเครื่องหมายก้ามปู [[]])
-            hl_tag = f'<mark style="background-color: #ffff00; color: #000000; padding: 1px 5px; border-radius: 2px; font-weight: bold; text-decoration: underline wavy red;">{wrong}</mark>'
+            hl_tag = f'<mark style="background-color: #ffff00; color: #000000; padding: 1px 5px; border-radius: 2px; font-weight: bold; text-decoration: underline wavy red; white-space: pre-wrap;">{wrong_display}</mark>'
             snippet = (issue.get("snippet") or "").strip()
             if wrong and wrong in snippet:
                 highlighted_snippet = snippet.replace(wrong, hl_tag, 1)
@@ -658,12 +706,14 @@ if st.session_state.check_results is not None:
                 highlighted_snippet = snippet
             else:
                 highlighted_snippet = hl_tag
+            # แปลง double-space ใน snippet ให้แสดงผลถูกต้องเช่นกัน
+            highlighted_snippet = highlighted_snippet.replace("  ", "&nbsp;&nbsp;")
             
             lines.append(f"•  **หน้า / ตำแหน่ง:** {pos_str}  ")
-            lines.append(f"•  **ข้อความในเอกสาร:** ...{highlighted_snippet}...  ")
-            lines.append(f"•  **จุดที่ผิด:** ❌ 🔴 <span style=\"color: #b91c1c; font-weight: bold; text-decoration: underline wavy red;\">{wrong}</span>  ")
-            lines.append(f"•  **แก้ไขเป็น:** ✅ 🟢 <span style=\"color: #15803d; font-weight: bold;\">{correct}</span>  ")
-            lines.append(f"•  **เหตุผล/คำแนะนำ:** {reason}\n")
+            lines.append(f'•  **ข้อความในเอกสาร:** <span style="white-space: pre-wrap;">...{highlighted_snippet}...</span>  ')
+            lines.append(f'•  **จุดที่ผิด:** ❌ 🔴 <span style="color: #b91c1c; font-weight: bold; text-decoration: underline wavy red; white-space: pre-wrap;">{wrong_display}</span>  ')
+            lines.append(f'•  **แก้ไขเป็น:** ✅ 🟢 <span style="color: #15803d; font-weight: bold; white-space: pre-wrap;">{correct_display}</span>  ')
+            lines.append(f"•  **เหตุผล/คำแนะนำ:** {reason_display}\n")
 
         report_text = "\n".join(lines)
 

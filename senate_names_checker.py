@@ -193,16 +193,28 @@ class SenateNamesChecker:
                         "reason": f"ในทำเนียบวุฒิสภาใช้คำนำหน้า '{exact_p['title']}' แนะนำ: '{exact_p['full_name_official']}'",
                         "pos": (start_pos, end_pos),
                     })
-                # ตรวจการเว้นวรรค ๒ เคาะ หรือเว้นวรรคยศ
-                elif span_text != exact_p["full_name_official"]:
-                    issues.append({
-                        "rule_type": "senate_personnel",
-                        "rule_name": f"การเว้นวรรคชื่อ-สกุล {exact_p['role']}",
-                        "wrong": span_text,
-                        "correct": exact_p["full_name_official"],
-                        "reason": f"ระหว่างชื่อตัวและนามสกุล ให้เว้นวรรคใหญ่ (๒ เคาะ) ตามระเบียบวุฒิสภา: '{exact_p['full_name_official']}'",
-                        "pos": (start_pos, end_pos),
-                    })
+                else:
+                    # ตรวจการเว้นวรรค ๒ เคาะ ระหว่างชื่อตัวและนามสกุลเท่านั้น
+                    # (ไม่สนใจ space ระหว่างคำนำหน้ากับชื่อ เพราะเป็นเรื่องรูปแบบเอกสาร)
+                    if ln:
+                        # นับจำนวน space จริง ๆ ในข้อความต้นฉบับระหว่างชื่อกับนามสกุล
+                        fn_end_in_span = span_text.find(fn) + len(fn)
+                        ln_start_in_span = span_text.find(ln, fn_end_in_span)
+                        if ln_start_in_span > fn_end_in_span:
+                            actual_gap = span_text[fn_end_in_span:ln_start_in_span]
+                            # กรองอักขระล่องหน (เช่น Zero-width space \u200b) ออกก่อนนับ
+                            clean_gap = re.sub(r'[\u200b\u200c\u200d\ufeff]', '', actual_gap)
+                            actual_spaces = len(clean_gap)
+                            if actual_spaces != 2:
+                                count_desc = f"พบ {actual_spaces} เคาะ" if actual_spaces > 0 else "พบว่าพิมพ์ติดกันโดยไม่เคาะวรรค"
+                                issues.append({
+                                    "rule_type": "senate_personnel",
+                                    "rule_name": f"การเว้นวรรคชื่อ-สกุล {exact_p['role']}",
+                                    "wrong": span_text,
+                                    "correct": exact_p["full_name_official"],
+                                    "reason": f"ระหว่างชื่อตัวและนามสกุล ให้เว้นวรรคใหญ่ (๒ เคาะ) ตามระเบียบวุฒิสภา ({count_desc}) แนะนำ: '{exact_p['full_name_official']}'",
+                                    "pos": (start_pos, end_pos),
+                                })
                 continue
 
             # 2. ตรวจความใกล้เคียง (Fuzzy Match สำหรับคำที่สะกดผิด)
@@ -239,6 +251,23 @@ class SenateNamesChecker:
 
                     if found_ln == ln:
                         covered_spans.append((fn_start, total_end))
+                        # ตรวจการเว้นวรรค ๒ เคาะ ระหว่างชื่อตัวและนามสกุล
+                        fn_end_in_span = full_span.find(fn) + len(fn)
+                        ln_start_in_span = full_span.find(ln, fn_end_in_span)
+                        if ln_start_in_span > fn_end_in_span:
+                            actual_gap = full_span[fn_end_in_span:ln_start_in_span]
+                            clean_gap = re.sub(r'[\u200b\u200c\u200d\ufeff]', '', actual_gap)
+                            actual_spaces = len(clean_gap)
+                            if actual_spaces != 2:
+                                count_desc = f"พบ {actual_spaces} เคาะ" if actual_spaces > 0 else "พบว่าพิมพ์ติดกันโดยไม่เคาะวรรค"
+                                issues.append({
+                                    "rule_type": "senate_personnel",
+                                    "rule_name": f"การเว้นวรรคชื่อ-สกุล {role}",
+                                    "wrong": full_span,
+                                    "correct": official,
+                                    "reason": f"ระหว่างชื่อตัวและนามสกุล ให้เว้นวรรคใหญ่ (๒ เคาะ) ตามระเบียบวุฒิสภา ({count_desc}) แนะนำ: '{official}'",
+                                    "pos": (fn_start, total_end),
+                                })
                         break
                     else:
                         sim_ln = self._sim(found_ln, ln)
