@@ -566,7 +566,7 @@ st.markdown("""
             <span>🔒</span> ความปลอดภัย 100% ข้อมูลไม่รั่วไหล (Zero Data Leak)
         </span>
         <span class="badge-pill">
-            <span>⚡</span> v3.5 Enterprise Master (อัปเดต 6 ต.ค. 2569)
+            <span>⚡</span> v3.5 Enterprise Master (อัปเดต 6 ต.ค. 2569 | 10:35 น.)
         </span>
     </div>
 </div>
