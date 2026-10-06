@@ -2,8 +2,6 @@
 maxUploadSize = 100
 enableStaticServing = true
 headless = true
-pingTimeout = 300
-pingInterval = 30
 
 [browser]
 gatherUsageStats = false
