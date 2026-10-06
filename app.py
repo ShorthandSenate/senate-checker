@@ -370,33 +370,104 @@ button span,
     line-height: 1.5;
 }
 
-/* Polished Dropzone */
+/* Grand Upload Hero Banner & Massive Dropzone */
+.grand-upload-banner {
+    background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+    border: 2.5px solid #cbd5e1;
+    border-bottom: none;
+    border-top-left-radius: 20px;
+    border-top-right-radius: 20px;
+    padding: 2.4rem 2rem 1.4rem 2rem;
+    text-align: center;
+    margin-top: 1rem;
+    box-shadow: 0 4px 15px rgba(15, 23, 42, 0.03);
+}
+.grand-upload-icon-circle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 82px;
+    height: 82px;
+    background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%);
+    border: 2.5px solid #bfdbfe;
+    border-radius: 50%;
+    margin-bottom: 0.9rem;
+    box-shadow: 0 6px 16px rgba(59, 130, 246, 0.15);
+}
+.grand-upload-title {
+    font-size: 1.75rem;
+    font-weight: 800;
+    color: #0f172a;
+    letter-spacing: -0.3px;
+    margin-bottom: 0.4rem;
+}
+.grand-upload-sub {
+    font-size: 1.08rem;
+    color: #475569;
+    margin-bottom: 1.1rem;
+}
+.grand-upload-specs {
+    display: flex;
+    justify-content: center;
+    flex-wrap: wrap;
+    gap: 10px;
+}
+.grand-spec-pill {
+    font-size: 0.84rem;
+    font-weight: 600;
+    color: #1e3a8a;
+    background: #e0e7ff;
+    border: 1px solid #c7d2fe;
+    padding: 5px 14px;
+    border-radius: 20px;
+}
+
 [data-testid="stFileUploadDropzone"] {
-    min-height: 220px !important;
-    border: 2px dashed #3b82f6 !important;
-    background: linear-gradient(180deg, #f8faff 0%, #f0f4ff 100%) !important;
-    border-radius: 16px !important;
+    min-height: 280px !important;
+    border: 3px dashed #1e3a8a !important;
+    border-top: 2px dashed #93c5fd !important;
+    background: linear-gradient(180deg, #f8faff 0%, #eef4ff 100%) !important;
+    border-top-left-radius: 0 !important;
+    border-top-right-radius: 0 !important;
+    border-bottom-left-radius: 20px !important;
+    border-bottom-right-radius: 20px !important;
     display: flex !important;
     flex-direction: column !important;
     justify-content: center !important;
     align-items: center !important;
-    padding: 2.2rem 1.5rem !important;
-    margin-top: 0.5rem !important;
+    padding: 2.5rem 2rem !important;
+    margin-top: 0 !important;
     margin-bottom: 1.5rem !important;
     cursor: pointer !important;
-    transition: all 0.25s ease-in-out !important;
-    box-shadow: inset 0 2px 8px rgba(59, 130, 246, 0.03) !important;
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1) !important;
+    box-shadow: 0 10px 25px -5px rgba(30, 58, 138, 0.08) !important;
 }
 [data-testid="stFileUploadDropzone"]:hover {
-    border-color: #1d4ed8 !important;
-    background: #eef2ff !important;
-    box-shadow: 0 8px 24px rgba(37, 99, 235, 0.12) !important;
+    border-color: #f59e0b !important;
+    background: linear-gradient(180deg, #f0f7ff 0%, #e0edff 100%) !important;
+    box-shadow: 0 16px 32px -5px rgba(30, 58, 138, 0.16) !important;
+}
+[data-testid="stFileUploadDropzone"] svg {
+    width: 64px !important;
+    height: 64px !important;
+    stroke: #1e3a8a !important;
 }
 [data-testid="stFileUploadDropzone"] button {
-    margin-top: 10px !important;
-    padding: 0.55rem 1.8rem !important;
-    border-radius: 8px !important;
-    font-weight: 600 !important;
+    background: linear-gradient(135deg, #1e3a8a 0%, #2563eb 100%) !important;
+    color: white !important;
+    border: none !important;
+    padding: 0.75rem 2.4rem !important;
+    border-radius: 12px !important;
+    font-size: 1.1rem !important;
+    font-weight: 700 !important;
+    box-shadow: 0 4px 14px rgba(37, 99, 235, 0.35) !important;
+    margin-top: 15px !important;
+    transition: all 0.2s ease !important;
+}
+[data-testid="stFileUploadDropzone"] button:hover {
+    background: linear-gradient(135deg, #1e40af 0%, #1d4ed8 100%) !important;
+    transform: scale(1.03) !important;
+    box-shadow: 0 6px 20px rgba(37, 99, 235, 0.45) !important;
 }
 
 /* Issue Card (Executive View) */
@@ -587,9 +658,12 @@ with st.sidebar:
     with st.expander("🔍 ค้นหารายชื่อในทำเนียบ", expanded=False):
         search_q = st.text_input("ค้นหาชื่อ/สกุล", key="search_person_q")
         matched = []
+        sq = (search_q or "").strip()
+        sq_alt = sq.replace("น.ส.", "นางสาว") if "น.ส." in sq else sq.replace("นางสาว", "น.ส.")
         for p in personnel_list:
             full = p.get("full_name_official", "")
-            if not search_q or search_q.strip() in full:
+            full_alt = full.replace("น.ส.", "นางสาว") if "น.ส." in full else full.replace("นางสาว", "น.ส.")
+            if not sq or (sq in full) or (sq_alt in full) or (sq in full_alt):
                 status_icon = "🟢" if p.get("is_active", 1) == 1 else "🔴 (พ้นตำแหน่ง)"
                 matched.append(f"{status_icon} **{full}** — *{p.get('role', '')}*")
         if matched:
@@ -653,11 +727,30 @@ for key in ["check_results", "paragraphs", "last_filename"]:
         st.session_state[key] = None
 
 # ============================================================
-# File Upload Area
+# Grand File Upload Area
 # ============================================================
-st.markdown("### 📂 อัปโหลดเอกสารรายงานการประชุมวุฒิสภา")
+st.markdown("""
+<div class="grand-upload-banner">
+    <div class="grand-upload-icon-circle">
+        <span style="font-size: 2.8rem;">📥</span>
+    </div>
+    <div class="grand-upload-title">
+        ลากและวางไฟล์รายงานการประชุม (.docx) ลงในช่องนี้
+    </div>
+    <div class="grand-upload-sub">
+        หรือคลิกปุ่ม <b>"Browse files"</b> เพื่อเลือกไฟล์จากคอมพิวเตอร์ของคุณ
+    </div>
+    <div class="grand-upload-specs">
+        <span class="grand-spec-pill">📄 รองรับไฟล์ Word (.docx)</span>
+        <span class="grand-spec-pill">⚡ รองรับเอกสาร ๒๐๐+ หน้า (สูงสุด 100 MB)</span>
+        <span class="grand-spec-pill">🛡️ สแกนครบทุกย่อหน้า 100%</span>
+        <span class="grand-spec-pill">🔒 ปลอดภัย ไม่ส่งข้อมูลออกภายนอก</span>
+    </div>
+</div>
+""", unsafe_allow_html=True)
+
 uploaded_file = st.file_uploader(
-    "เลือกไฟล์ Word (.docx) หรือลากไฟล์มาวางในพื้นที่นี้ (รองรับ 200+ หน้า ขนาดสูงสุด 100 MB)",
+    "ลากไฟล์รายงานการประชุม (.docx) มาวางที่นี่ หรือคลิก Browse files",
     type=["docx"],
     help=f"ขนาดไฟล์สูงสุด {MAX_FILE_SIZE_MB} MB",
     label_visibility="collapsed",
@@ -729,48 +822,46 @@ if uploaded_file:
             logging.exception("run_full_check error")
 
 # ============================================================
-# Empty State: Executive Presentation (เมื่อยังไม่มีไฟล์)
+# Empty State: Collapsible 7 Pillars (ซ่อนไว้เพื่อเน้นพื้นที่อัปโหลดไฟล์)
 # ============================================================
 elif not uploaded_file and st.session_state.check_results is None:
-    st.markdown("""
-    <div style="margin-top: 1rem; margin-bottom: 2rem;">
-        <h4 style="color:#1e3a8a; font-weight:700; margin-bottom:1rem; display:flex; align-items:center; gap:8px;">
-            <span>🛡️</span> เสาหลักการตรวจสอบความถูกต้อง ๗ ประการ (Quality Assurance Pillars)
-        </h4>
-        <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap:16px;">
-            <div class="pillar-card">
-                <div class="pillar-icon">🏛️</div>
-                <div class="pillar-title">๑. ทำเนียบ สว. และผู้บริหาร (๒๑๕ ท่าน)</div>
-                <div class="pillar-desc">ตรวจสอบคำนำหน้า ยศ การสะกดชื่อ-นามสกุล และบังคับใช้กฎ <b>เว้นวรรค ๒ เคาะ</b> ระหว่างชื่อตัวและนามสกุลตามระเบียบสารบรรณรัฐสภา 100%</div>
-            </div>
-            <div class="pillar-card">
-                <div class="pillar-icon">📚</div>
-                <div class="pillar-title">๒. คำทับศัพท์และศัพท์บัญญัติ (๑,๕๖๑ คำ)</div>
-                <div class="pillar-desc">เทียบเคียงกับคลังคำศัพท์ทางการของวุฒิสภาและราชบัณฑิตยสภา ตรวจจับคำภาษาอังกฤษที่ควรใช้คำไทย และคำทับศัพท์ที่สะกดผิด</div>
-            </div>
-            <div class="pillar-card">
-                <div class="pillar-icon">📄</div>
-                <div class="pillar-title">๓. หัวแผ่นกระดาษและระบุหน้าแม่นยำ</div>
-                <div class="pillar-desc">ตรวจจับรหัสหัวแผ่นกระดาษ (เช่น <i>๒๙/๑</i>) และเลขย่อหน้าอย่างละเอียด ช่วยให้ค้นหาจุดผิดในเอกสารต้นฉบับได้ใน ๒ วินาที</div>
-            </div>
-            <div class="pillar-card">
-                <div class="pillar-icon">📏</div>
-                <div class="pillar-title">๔. กฎวงเล็บภาษาอังกฤษซ้ำ</div>
-                <div class="pillar-desc">อนุญาตให้ใส่วงเล็บภาษาอังกฤษขยายความได้เฉพาะครั้งแรกที่คำนั้นปรากฏในรายงานเท่านั้น หากพบในย่อหน้าถัดไปจะแจ้งเตือนให้ตัดออก</div>
-            </div>
-            <div class="pillar-card">
-                <div class="pillar-icon">🔤</div>
-                <div class="pillar-title">๕. คำสะกดผิดทางการและคำสลับพยัญชนะ</div>
-                <div class="pillar-desc">ตรวจจับคำผิดยอดนิยมในรายงานการประชุม เช่น <i>สัมมนา, ผูกพัน, สังเกต, ลายเซ็น, ปาฐกถา</i> ตามพจนานุกรมฉบับราชบัณฑิตยสถาน</div>
-            </div>
-            <div class="pillar-card">
-                <div class="pillar-icon">⚙️</div>
-                <div class="pillar-title">๖. การใช้ไม้ยมก (ๆ) และเครื่องหมายวรรคตอน</div>
-                <div class="pillar-desc">กวดขันการเว้นวรรคหน้าและหลังไม้ยมก และเครื่องหมายวรรคตอนตามหลักไวยากรณ์ทางการอย่างถูกต้องและเป็นระเบียบ</div>
+    with st.expander("🛡️ ดูรายละเอียด: เสาหลักเกณฑ์การตรวจสอบความถูกต้อง ๗ ประการ (คลิกเพื่อเปิดดู)", expanded=False):
+        st.markdown("""
+        <div style="margin-top: 0.5rem; margin-bottom: 1rem;">
+            <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap:14px;">
+                <div class="pillar-card">
+                    <div class="pillar-icon">🏛️</div>
+                    <div class="pillar-title">๑. ทำเนียบ สว. และผู้บริหาร (๒๑๕ ท่าน)</div>
+                    <div class="pillar-desc">ตรวจสอบคำนำหน้า ยศ การสะกดชื่อ-นามสกุล และบังคับใช้กฎ <b>เว้นวรรค ๒ เคาะ</b> ระหว่างชื่อตัวและนามสกุลตามระเบียบสารบรรณรัฐสภา 100%</div>
+                </div>
+                <div class="pillar-card">
+                    <div class="pillar-icon">📚</div>
+                    <div class="pillar-title">๒. คำทับศัพท์และศัพท์บัญญัติ (๑,๕๖๑ คำ)</div>
+                    <div class="pillar-desc">เทียบเคียงกับคลังคำศัพท์ทางการของวุฒิสภาและราชบัณฑิตยสภา ตรวจจับคำภาษาอังกฤษที่ควรใช้คำไทย และคำทับศัพท์ที่สะกดผิด</div>
+                </div>
+                <div class="pillar-card">
+                    <div class="pillar-icon">📄</div>
+                    <div class="pillar-title">๓. หัวแผ่นกระดาษและระบุหน้าแม่นยำ</div>
+                    <div class="pillar-desc">ตรวจจับรหัสหัวแผ่นกระดาษ (เช่น <i>๒๙/๑</i>) และเลขย่อหน้าอย่างละเอียด ช่วยให้ค้นหาจุดผิดในเอกสารต้นฉบับได้ใน ๒ วินาที</div>
+                </div>
+                <div class="pillar-card">
+                    <div class="pillar-icon">📏</div>
+                    <div class="pillar-title">๔. กฎวงเล็บภาษาอังกฤษซ้ำ</div>
+                    <div class="pillar-desc">อนุญาตให้ใส่วงเล็บภาษาอังกฤษขยายความได้เฉพาะครั้งแรกที่คำนั้นปรากฏในรายงานเท่านั้น หากพบในย่อหน้าถัดไปจะแจ้งเตือนให้ตัดออก</div>
+                </div>
+                <div class="pillar-card">
+                    <div class="pillar-icon">🔤</div>
+                    <div class="pillar-title">๕. คำสะกดผิดทางการและคำสลับพยัญชนะ</div>
+                    <div class="pillar-desc">ตรวจจับคำผิดยอดนิยมในรายงานการประชุม เช่น <i>สัมมนา, ผูกพัน, สังเกต, ลายเซ็น, ปาฐกถา</i> ตามพจนานุกรมฉบับราชบัณฑิตยสถาน</div>
+                </div>
+                <div class="pillar-card">
+                    <div class="pillar-icon">⚙️</div>
+                    <div class="pillar-title">๖. การใช้ไม้ยมก (ๆ) และเครื่องหมายวรรคตอน</div>
+                    <div class="pillar-desc">กวดขันการเว้นวรรคหน้าและหลังไม้ยมก และเครื่องหมายวรรคตอนตามหลักไวยากรณ์ทางการอย่างถูกต้องและเป็นระเบียบ</div>
+                </div>
             </div>
         </div>
-    </div>
-    """, unsafe_allow_html=True)
+        """, unsafe_allow_html=True)
 
 # ============================================================
 # Results Display Dashboard

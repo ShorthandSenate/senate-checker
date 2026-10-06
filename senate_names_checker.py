@@ -25,7 +25,65 @@ TITLES = [
     "พันเอกหญิง", "ว่าที่พันตรี", "นาวาตรี",
     "พลเอก", "พลโท", "พลตรี", "พันเอก", "พันโท", "พันตรี",
     "นางสาว", "น.ส.", "นาย", "นาง",
+    "พล.ต.อ.", "พล.ต.ท.", "พล.ต.ต.", "พ.ต.อ.", "พ.ต.ท.", "พ.ต.ต.",
+    "ร.ต.อ.", "ร.ต.ท.", "ร.ต.ต.",
+    "พล.อ.", "พล.ท.", "พล.ต.", "พ.อ.", "พ.ท.", "พ.ต.",
+    "ร.อ.", "ร.ท.", "ร.ต.", "น.ต.", "พ.อ.หญิง", "ว่าที่ พ.ต.",
+    "ศ.", "รศ.", "ผศ.", "ผศ.พิเศษ",
 ]
+
+# กลุ่มคำนำหน้านามที่เทียบเท่ากัน (ตัวเต็ม <-> ตัวย่อ) เพื่อให้ระบบเข้าใจทั้ง ๒ แบบเท่าเทียมกัน
+TITLE_EQUIVALENCE_GROUPS = [
+    {"นางสาว", "น.ส."},
+    {"พลเอก", "พล.อ."},
+    {"พลโท", "พล.ท."},
+    {"พลตรี", "พล.ต."},
+    {"พันเอก", "พ.อ."},
+    {"พันโท", "พ.ท."},
+    {"พันตรี", "พ.ต."},
+    {"ร้อยเอก", "ร.อ."},
+    {"ร้อยโท", "ร.ท."},
+    {"ร้อยตรี", "ร.ต."},
+    {"พลตำรวจเอก", "พล.ต.อ."},
+    {"พลตำรวจโท", "พล.ต.ท."},
+    {"พลตำรวจตรี", "พล.ต.ต."},
+    {"พันตำรวจเอก", "พ.ต.อ."},
+    {"พันตำรวจโท", "พ.ต.ท."},
+    {"พันตำรวจตรี", "พ.ต.ต."},
+    {"ร้อยตำรวจเอก", "ร.ต.อ."},
+    {"ร้อยตำรวจโท", "ร.ต.ท."},
+    {"ร้อยตำรวจตรี", "ร.ต.ต."},
+    {"พันเอกหญิง", "พ.อ.หญิง"},
+    {"ว่าที่พันตรี", "ว่าที่ พ.ต.", "ว่าที่พันตรี"},
+    {"นาวาตรี", "น.ต."},
+    {"ศาสตราจารย์", "ศ."},
+    {"รองศาสตราจารย์", "รศ."},
+    {"ผู้ช่วยศาสตราจารย์", "ผศ."},
+    {"ผู้ช่วยศาสตราจารย์พิเศษ", "ผศ.พิเศษ"},
+]
+
+TITLE_EQUIVALENTS: Dict[str, set] = {}
+for grp in TITLE_EQUIVALENCE_GROUPS:
+    for t in grp:
+        TITLE_EQUIVALENTS[t] = grp
+
+
+def is_title_equivalent(t1: str, t2: str) -> bool:
+    """ตรวจสอบว่าคำนำหน้านามมีความหมายเดียวกันหรือไม่ (เช่น น.ส. เทียบเท่า นางสาว)"""
+    if t1 == t2:
+        return True
+    return t2 in TITLE_EQUIVALENTS.get(t1, {t1})
+
+
+def is_rank_title(title: str) -> bool:
+    """ตรวจสอบว่าเป็นคำนำหน้านามที่เป็นยศทหาร/ตำรวจ/วิชาการหรือไม่ (ต้องเว้น ๑ เคาะหลังยศ)"""
+    rank_prefixes = [
+        "พล", "พัน", "ร้อย", "นาวา", "ว่าที่",
+        "ศาสตราจารย์", "รองศาสตราจารย์", "ผู้ช่วยศาสตราจารย์",
+        "ศ.", "รศ.", "ผศ.", "น.ต.", "พ.ต.", "พ.อ.", "ร.ต.", "ร.อ.", "ร.ท."
+    ]
+    return any(title.startswith(p) for p in rank_prefixes)
+
 
 TITLES_PATTERN = "|".join([re.escape(t) for t in sorted(TITLES, key=len, reverse=True)])
 TITLE_NAME_RE = re.compile(rf'({TITLES_PATTERN})\s*([ก-๙]+)(?:\s+([ก-๙]+))?')
@@ -84,10 +142,15 @@ class SenateNamesChecker:
             fn = p.get("first_name", "")
             ln = p.get("last_name", "")
             self.exact_full_names.add(p.get("full_name_official", ""))
-            self.exact_full_names.add(f"{t}{fn} {ln}".strip())
-            self.exact_full_names.add(f"{t} {fn} {ln}".strip())
-            self.exact_full_names.add(f"{t}{fn}  {ln}".strip())
-            self.exact_full_names.add(f"{t} {fn}  {ln}".strip())
+
+            # เพิ่มทุกรูปแบบคำนำหน้าที่เทียบเท่ากัน (เช่น น.ส. และ นางสาว)
+            t_variants = TITLE_EQUIVALENTS.get(t, {t})
+            for var_t in t_variants:
+                self.exact_full_names.add(f"{var_t}{fn} {ln}".strip())
+                self.exact_full_names.add(f"{var_t} {fn} {ln}".strip())
+                self.exact_full_names.add(f"{var_t}{fn}  {ln}".strip())
+                self.exact_full_names.add(f"{var_t} {fn}  {ln}".strip())
+
             self.exact_full_names.add(f"{fn} {ln}".strip())
             self.exact_full_names.add(f"{fn}  {ln}".strip())
 
@@ -183,8 +246,8 @@ class SenateNamesChecker:
 
             if exact_p:
                 covered_spans.append((start_pos, end_pos))
-                # ตรวจความสอดคล้องของคำนำหน้า (เช่น น.ส. vs นางสาว vs นาง)
-                if title != exact_p["title"]:
+                # ตรวจความสอดคล้องของคำนำหน้า (ยอมรับตัวย่อและตัวเต็มที่เทียบเท่ากัน เช่น น.ส. == นางสาว)
+                if not is_title_equivalent(title, exact_p["title"]):
                     issues.append({
                         "rule_type": "senate_personnel",
                         "rule_name": f"คำนำหน้าชื่อ {exact_p['role']}",
@@ -194,6 +257,7 @@ class SenateNamesChecker:
                         "pos": (start_pos, end_pos),
                     })
                 else:
+                    # คำนำหน้าถูกต้องหรือเทียบเท่ากัน (เช่น น.ส. กับ นางสาว)
                     # ตรวจการเว้นวรรค ๒ เคาะ ระหว่างชื่อตัวและนามสกุลเท่านั้น
                     # (ไม่สนใจ space ระหว่างคำนำหน้ากับชื่อ เพราะเป็นเรื่องรูปแบบเอกสาร)
                     if ln:
@@ -207,12 +271,17 @@ class SenateNamesChecker:
                             actual_spaces = len(clean_gap)
                             if actual_spaces != 2:
                                 count_desc = f"พบ {actual_spaces} เคาะ" if actual_spaces > 0 else "พบว่าพิมพ์ติดกันโดยไม่เคาะวรรค"
+                                # สร้างรูปแบบที่ถูกต้องโดยคงคำนำหน้าที่ผู้เขียนใช้ในเอกสาร (เช่น น.ส. หรือ นางสาว) พร้อมวรรค ๒ เคาะ
+                                if is_rank_title(title):
+                                    expected_official = f"{title} {fn}  {ln}".strip()
+                                else:
+                                    expected_official = f"{title}{fn}  {ln}".strip()
                                 issues.append({
                                     "rule_type": "senate_personnel",
                                     "rule_name": f"การเว้นวรรคชื่อ-สกุล {exact_p['role']}",
                                     "wrong": span_text,
-                                    "correct": exact_p["full_name_official"],
-                                    "reason": f"ระหว่างชื่อตัวและนามสกุล ให้เว้นวรรคใหญ่ (๒ เคาะ) ตามระเบียบวุฒิสภา ({count_desc}) แนะนำ: '{exact_p['full_name_official']}'",
+                                    "correct": expected_official,
+                                    "reason": f"ระหว่างชื่อตัวและนามสกุล ให้เว้นวรรคใหญ่ (๒ เคาะ) ตามระเบียบวุฒิสภา ({count_desc}) แนะนำ: '{expected_official}'",
                                     "pos": (start_pos, end_pos),
                                 })
                 continue
@@ -221,12 +290,20 @@ class SenateNamesChecker:
             best_p, best_score = self._find_best_person(fn, ln)
             if best_p and best_score >= 0.82:
                 covered_spans.append((start_pos, end_pos))
+                # หากคำนำหน้าที่ผู้เขียนใช้เทียบเท่ากับคำนำหน้าทางการ (เช่น น.ส. กับ นางสาว)
+                # ให้แสดงคำนำหน้าที่ผู้เขียนใช้ในคำแนะนำเพื่อความสอดคล้อง
+                rec_title = title if is_title_equivalent(title, best_p["title"]) else best_p["title"]
+                if is_rank_title(rec_title):
+                    rec_official = f"{rec_title} {best_p['first_name']}  {best_p['last_name']}".strip()
+                else:
+                    rec_official = f"{rec_title}{best_p['first_name']}  {best_p['last_name']}".strip()
+
                 issues.append({
                     "rule_type": "senate_personnel",
                     "rule_name": f"ความถูกต้องของชื่อ-สกุล {best_p['role']}",
                     "wrong": span_text,
-                    "correct": best_p["full_name_official"],
-                    "reason": f"ชื่อใกล้เคียงกับ {best_p['role']}: '{best_p['full_name_official']}' แนะนำให้ตรวจสอบการสะกด",
+                    "correct": rec_official,
+                    "reason": f"ชื่อใกล้เคียงกับ {best_p['role']}: '{rec_official}' แนะนำให้ตรวจสอบการสะกด",
                     "pos": (start_pos, end_pos),
                 })
 
